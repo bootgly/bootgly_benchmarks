@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">Bootgly_Benchmarks ⏱️</h1>
 <p align="center">
-  <i>Benchmarks comparing Bootgly with competitors.</i>
+  <i>Benchmarks comparing Bootgly with alternatives.</i>
 </p>
 <p align="center">
   <a href="https://packagist.org/packages/bootgly/bootgly">

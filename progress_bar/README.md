@@ -112,7 +112,8 @@ php progress.php
 ---
 5) Wait the progress and check the time spent to complete 250K iterations:
 
-![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/assets/9668277/b5a70e60-5aac-4991-8405-f8b28a94f4cf)
+![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/blob/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png)
+
 </details>
 
 
@@ -194,7 +195,8 @@ echo PHP_EOL;
 ---
 5) Wait the progress and check the time spent to complete 250K iterations:
 
-![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/assets/9668277/eaae01ac-a5b7-48c6-a5cf-48766b407d8f)
+![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/laravel/laravel-progress_bar-benchmark.1.png)
+
 </details>
 
 ---
@@ -204,10 +206,10 @@ echo PHP_EOL;
 > Bootgly Progress Bar is ≈ 7x faster than Laravel / Symfony Progress Bar
 
 ### Bootgly Progress Bar
-![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/assets/9668277/b5a70e60-5aac-4991-8405-f8b28a94f4cf)
+![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/blob/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png)
 
 ### Laravel/Symfony Progress Bar
-![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/assets/9668277/eaae01ac-a5b7-48c6-a5cf-48766b407d8f)
+![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/laravel/laravel-progress_bar-benchmark.1.png)
 
 Framework | Result | Position
 --- | --- | ---

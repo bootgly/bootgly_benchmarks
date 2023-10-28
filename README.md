@@ -10,3 +10,10 @@
     <img alt="Bootgly License" src="https://img.shields.io/github/license/bootgly/bootgly"/>
   </a>
 </p>
+
+Benchmarks | Interface | Result
+--- | --- | ---
+[Progress Bar][PROGRESS_BAR]  | CLI | Bootgly Progress Bar is ≈ 7x faster than Laravel / Symfony Progress Bar to render 250k iterations
+
+<!-- Links -->
+[PROGRESS_BAR]: https://github.com/bootgly/bootgly_benchmarks/tree/main/progress_bar

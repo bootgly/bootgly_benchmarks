@@ -212,4 +212,4 @@ echo PHP_EOL;
 Framework | Result | Position
 --- | --- | ---
 Bootgly | 6.49s | 🥇 First (winner)
-Laravel/Symfon | 45s | 🥈 Second
+Laravel/Symfony | 45s | 🥈 Second

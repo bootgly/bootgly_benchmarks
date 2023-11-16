@@ -2,7 +2,7 @@
 
 This document contains informations about benchmarking the **Progress Bar** component, a well-known component for the CLI.
 
-| ![](https://github.com/bootgly/.github/raw/main/screenshots/bootgly-php-framework/Bootgly-Progress-Bar-component.png "Render 6x faster than Symfony / Laravel") |
+| ![](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png "Render 6x faster than Symfony / Laravel") |
 |:--:| 
 | *Progress component (with Bar) - Render ≈ 7x faster than Symfony / Laravel* |
 
@@ -211,7 +211,7 @@ Bootgly | 6.49s | 🥇 First (winner)
 Laravel/Symfony | 45s | 🥈 Second
 
 ### Bootgly Progress Bar
-![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/blob/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png)
+![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png)
 
 ---
 

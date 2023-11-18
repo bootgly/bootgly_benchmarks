@@ -211,9 +211,9 @@ Bootgly | 6.49s | 🥇 First (winner)
 Laravel/Symfony | 45s | 🥈 Second
 
 ### Bootgly Progress Bar
-![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/bootgly/bootgly-progress_bar-benchmark.1.png)
+![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/Bootgly/bootgly-progress_bar-benchmark.1.png)
 
 ---
 
 ### Laravel/Symfony Progress Bar
-![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/progress_bar/laravel/laravel-progress_bar-benchmark.1.png)
+![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/Laravel/laravel-progress_bar-benchmark.1.png)

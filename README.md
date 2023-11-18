@@ -17,4 +17,4 @@ Benchmarks | Interface | Result
 Template Engine - foreach (TODO) | ABI | ≈ 9x faster than Laravel Blade (without sacrificing features)
 
 <!-- Links -->
-[PROGRESS_BAR]: https://github.com/bootgly/bootgly_benchmarks/tree/main/progress_bar
+[PROGRESS_BAR]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Progress_Bar

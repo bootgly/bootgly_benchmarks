@@ -1,4 +1,4 @@
-# ⏱️ Benchmark - Progress Bar (WIP)
+# ⏱️ Benchmark - Progress Bar
 
 This document contains informations about benchmarking the **Progress Bar** component, a well-known component for the CLI.
 
@@ -33,21 +33,31 @@ CLI
   <summary><b>🥇 Benchmark on Bootgly</b></summary><br>
 
 1) Clone the Bootgly base platform repository:
+
 ```bash
 git clone https://github.com/bootgly/bootgly.git
 ```
+
 ---
+
 2) Change directory to `bootgly/scripts`:
+
 ```bash
 cd bootgly/scripts
 ```
+
 ---
+
 3) Create a temp script:
+
 ```bash
 nano progress.php
 ```
+
 ---
+
 4) Copy and paste the Bootgly Progress Bar benchmarking code:
+
 ```php
 <?php
 namespace scripts;
@@ -77,13 +87,14 @@ $Progress->template = <<<'TEMPLATE'
 ⏱️ @elapsed;s - 🏁 @eta;s - 📈 @rate; loops/s
 TEMPLATE;
 
-// ! Bar
+// / Bar
+$Bar = $Progress->Bar;
 // * Config
-$Progress->Bar->units = 10;
+$Bar->units = 10;
 // * Data
-$Progress->Bar->Symbols->incomplete = '🖤';
-$Progress->Bar->Symbols->current = '';
-$Progress->Bar->Symbols->complete = '❤️';
+$Bar->Symbols->incomplete = '🖤';
+$Bar->Symbols->current = '';
+$Bar->Symbols->complete = '❤️';
 
 $Progress->start();
 
@@ -105,12 +116,45 @@ while ($i++ < 250000) {
 $Progress->finish();
 ```
 
-Execute the script:
+---
+
+5) Register the script `progress.php` on script bootstrap file (`scripts/@.php`):
+
+```bash
+nano scripts/@.php
+```
+
+```php
+<?php
+return [
+   'scripts' => [
+      'built-in' => [ # Relative to scripts/ (bootgly's root directory)
+         'http-server-cli',
+         'tcp-server-cli',
+         'tcp-client-cli',
+      ],
+      'imported' => [ # Relative to working directory (your root directory)
+         'vendor/bin/phpstan'
+      ],
+      'user' => [ # Relative to scripts/ (your working directory)
+         // Define your scripts filenames here
+         'progress.php' # <<<------ HERE
+      ]
+   ]
+];
+```
+
+---
+
+6) Execute the script:
+
 ```bash
 php progress.php
 ```
+
 ---
-5) Wait the progress and check the time spent to complete 250K iterations:
+
+7) Wait the progress and check the time spent to complete 250K iterations:
 
 ![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/blob/main/Progress_Bar/Bootgly/bootgly-progress_bar-benchmark.1.png)
 
@@ -126,18 +170,27 @@ php progress.php
 ```bash
 composer create-project --prefer-dist laravel/laravel laravel
 ```
+
 ---
+
 2) Change directory to `laravel`:
+
 ```bash
 cd laravel
 ```
+
 ---
+
 3) Create new PHP script on root:
+
 ```bash
 nano progress_bar.php
 ```
+
 ---
+
 4) Copy and paste the Laravel Progress Bar benchmarking code:
+
 ```php
 #!/usr/bin/env php
 <?php
@@ -150,7 +203,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
 
 $output = new ConsoleOutput();
 
-// creates a new progress bar (50 units)
+// Creates a new progress bar (250000 units)
 $progressBar = new ProgressBar($output, 250000, 0);
 
 $progressBar->setFormat(<<<'TEMPLATE'
@@ -169,7 +222,7 @@ $progressBar->setBarCharacter('❤️');
 $progressBar->setEmptyBarCharacter('🖤');
 $progressBar->setProgressCharacter('');
 
-// starts and displays the progress bar
+// Starts and displays the progress bar
 $progressBar->start();
 
 $i = 0;
@@ -192,6 +245,7 @@ $progressBar->finish();
 
 echo PHP_EOL;
 ```
+
 ---
 5) Wait the progress and check the time spent to complete 250K iterations:
 
@@ -211,9 +265,11 @@ Bootgly | 6.49s | 🥇 First (winner)
 Laravel/Symfony | 45s | 🥈 Second
 
 ### Bootgly Progress Bar
+
 ![bootgly-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/Bootgly/bootgly-progress_bar-benchmark.1.png)
 
 ---
 
 ### Laravel/Symfony Progress Bar
+
 ![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/Laravel/laravel-progress_bar-benchmark.1.png)

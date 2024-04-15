@@ -30,7 +30,7 @@ It's important to note that the Bootgly template engine does not sacrifice any o
 
 **Interface:**
 
-CLI
+ABI
 
 **Platform:**
 

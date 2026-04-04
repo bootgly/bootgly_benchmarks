@@ -1,0 +1,14 @@
+# Build/install outputs — not committed
+vendor/
+composer.lock
+node_modules/
+
+# RoadRunner Go binary (~56 MB)
+rr
+
+# FrankenPHP binary (installed system-wide, not committed)
+frankenphp
+
+# Runtime files
+*.log
+*.pid

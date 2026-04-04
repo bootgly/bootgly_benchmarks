@@ -1,0 +1,12 @@
+version: "3"
+
+server:
+  command: "php worker.php"
+
+http:
+  address: "0.0.0.0:8082"
+  pool:
+    num_workers: 12
+
+logs:
+  level: error

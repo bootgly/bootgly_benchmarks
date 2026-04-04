@@ -130,7 +130,7 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 
 | Dependency | Purpose | Required |
 |-----------|---------|----------|
-| **PHP** ≥ 8.1 | Server runtime | ✅ |
+| **PHP** ≥ 8.4 | Server runtime | ✅ |
 | **Composer** | PHP dependency management | ✅ |
 | **wrk** | HTTP benchmarking tool | ✅ |
 | **lsof** | Port detection | ✅ |

@@ -21,12 +21,15 @@ DRIVER_VERSION="v$(grep -oP "define\('BOOTGLY_VERSION',\s*'\\K[^']+" "$BOOTGLY_D
 # Worker count matches WPI.project.php: max(1, nproc / 2)
 DRIVER_WORKERS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
 [[ "$DRIVER_WORKERS" -lt 1 ]] && DRIVER_WORKERS=1
+DRIVER_WRK_THREADS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
+[[ "$DRIVER_WRK_THREADS" -lt 1 ]] && DRIVER_WRK_THREADS=1
 
 driver_start () {
    cd "$BOOTGLY_DIR" || return 1
    # Stop any existing instance first (stale PID files cause "already running" errors)
    php bootgly project stop HTTP_Server_CLI >/dev/null 2>&1 || true
    sleep 0.5
+   BOOTGLY_WORKERS="$DRIVER_WORKERS" \
    php bootgly project run HTTP_Server_CLI >/dev/null 2>&1
    wait_for_server
 }

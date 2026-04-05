@@ -17,7 +17,7 @@ use Swoole\Http\Request;
 use Swoole\Http\Response;
 use function Swoole\Coroutine\run;
 
-$workers = (int) (shell_exec('nproc') / 2) ?: 1;
+$workers = (int) (getenv('SERVER_WORKER_NUM') ?: shell_exec('nproc') / 2) ?: 1;
 $host = '0.0.0.0';
 $port = 8082;
 

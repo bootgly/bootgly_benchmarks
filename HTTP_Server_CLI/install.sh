@@ -28,6 +28,7 @@ NC='\033[0m'
 INSTALL_WRK=false
 INSTALL_ROADRUNNER=false
 INSTALL_WORKERMAN=false
+INSTALL_HYPERF=false
 INSTALL_FRANKENPHP=false
 INSTALL_SWOOLE=false
 INSTALL_ALL=false
@@ -42,10 +43,11 @@ for arg in "$@"; do
       --wrk)         INSTALL_WRK=true ;;
       --roadrunner)  INSTALL_ROADRUNNER=true ;;
       --workerman)   INSTALL_WORKERMAN=true ;;
+      --hyperf)      INSTALL_HYPERF=true ;;
       --frankenphp)  INSTALL_FRANKENPHP=true ;;
       --swoole)      INSTALL_SWOOLE=true ;;
       --help|-h)
-         echo "Usage: bash install.sh [--all] [--wrk] [--roadrunner] [--workerman] [--frankenphp] [--swoole]"
+         echo "Usage: bash install.sh [--all] [--wrk] [--roadrunner] [--workerman] [--hyperf] [--frankenphp] [--swoole]"
          echo ""
          echo "Without flags, installs everything (same as --all)."
          exit 0
@@ -62,6 +64,7 @@ if $INSTALL_ALL; then
    INSTALL_WRK=true
    INSTALL_ROADRUNNER=true
    INSTALL_WORKERMAN=true
+   INSTALL_HYPERF=true
    INSTALL_FRANKENPHP=true
    INSTALL_SWOOLE=true
 fi
@@ -192,6 +195,47 @@ if $INSTALL_WORKERMAN; then
       ok "Workerman $WM_VERSION ready"
    else
       fail "composer.json not found in artifacts/workerman/"
+   fi
+
+   cd "$SCRIPT_DIR"
+   echo ""
+fi
+
+# =============================================================================
+# Hyperf
+# =============================================================================
+
+if $INSTALL_HYPERF; then
+   echo -e "${BOLD}Installing Hyperf...${NC}"
+
+   cd "$ARTIFACTS_DIR/hyperf"
+
+   if [[ -f composer.json ]]; then
+      info "Running composer install..."
+      composer install --no-interaction --quiet 2>&1
+      ok "Hyperf dependencies installed"
+
+      HF_VERSION=$(grep -A5 '"name": "hyperf/framework"' composer.lock 2>/dev/null \
+         | grep '"version"' | grep -oP '"\Kv?[0-9][^"]+' || echo "unknown")
+      ok "Hyperf $HF_VERSION ready"
+
+      if php -m 2>/dev/null | grep -qi swoole; then
+         ok "Swoole extension detected (required by Hyperf)"
+      else
+         warn "Swoole extension not loaded — Hyperf requires it."
+         info "Install Swoole first: bash install.sh --swoole"
+      fi
+
+      # Check swoole.use_shortname
+      SHORTNAME=$(php -r "echo ini_get('swoole.use_shortname');" 2>/dev/null || echo "")
+      if [[ "$SHORTNAME" == "" || "$SHORTNAME" == "Off" || "$SHORTNAME" == "0" || "$SHORTNAME" == "off" ]]; then
+         ok "swoole.use_shortname is Off (required by Hyperf)"
+      else
+         warn "swoole.use_shortname is On — Hyperf requires it to be Off"
+         info "Add 'swoole.use_shortname=Off' to your php.ini"
+      fi
+   else
+      fail "composer.json not found in artifacts/hyperf/"
    fi
 
    cd "$SCRIPT_DIR"

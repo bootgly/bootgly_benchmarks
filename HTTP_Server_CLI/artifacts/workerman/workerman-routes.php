@@ -7,7 +7,7 @@ use Workerman\Protocols\Http\Response;
 use Workerman\Protocols\Http\Request;
 
 $http_worker = new Worker('http://0.0.0.0:8082');
-$http_worker->count = 12;
+$http_worker->count = (int) (getenv('SERVER_WORKER_NUM') ?: 12);
 
 $http_worker->onWorkerStart = function () {
     Header::$date = gmdate('D, d M Y H:i:s').' GMT';

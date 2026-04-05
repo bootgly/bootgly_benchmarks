@@ -12,6 +12,8 @@ DRIVER_VERSION=$(cd "$ROADRUNNER_DIR" && ./rr -v 2>/dev/null | grep -oP 'version
 # Match Bootgly's worker count for a fair comparison
 DRIVER_WORKERS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
 [[ "$DRIVER_WORKERS" -lt 1 ]] && DRIVER_WORKERS=1
+DRIVER_WRK_THREADS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
+[[ "$DRIVER_WRK_THREADS" -lt 1 ]] && DRIVER_WRK_THREADS=1
 
 driver_start () {
    cd "$ROADRUNNER_DIR" || return 1

@@ -121,6 +121,7 @@ Competitors not listed are **automatically skipped** during the benchmark.
 | **Swoole** (Coroutine mode) | PHP (C extension) | Coroutine + fork |
 | **RoadRunner** | Go + PHP (goridge) | PSR-7 worker |
 | **FrankenPHP** | Go + PHP (worker mode) | Caddy-based |
+| **Hyperf** | PHP (Swoole framework) | Full-stack coroutine |
 
 All competitors use `nproc / 2` workers for fair CPU distribution.
 
@@ -136,7 +137,7 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 | **lsof** | Port detection | ✅ |
 | **curl** | Server readiness check | ✅ |
 | **nproc** | CPU count detection | ✅ |
-| **Swoole extension** | Swoole benchmarks | Optional |
+| **Swoole extension** | Swoole / Hyperf benchmarks | Optional |
 | **FrankenPHP binary** | FrankenPHP benchmarks | Optional |
 
 ---
@@ -198,7 +199,17 @@ composer install
 cd -
 ```
 
-#### 5. Install Swoole (optional)
+#### 5. Install Hyperf
+
+```bash
+cd scripts/benchmarks/HTTP_Server_CLI/artifacts/hyperf
+composer install
+cd -
+```
+
+> **Note:** Hyperf requires the Swoole extension with `swoole.use_shortname=Off` in your `php.ini`.
+
+#### 6. Install Swoole (optional)
 
 ```bash
 # Via PECL
@@ -211,7 +222,7 @@ cd swoole-src && phpize && ./configure && make -j$(nproc) && sudo make install
 
 Add `extension=swoole.so` to your `php.ini`.
 
-#### 6. Install FrankenPHP (optional)
+#### 7. Install FrankenPHP (optional)
 
 ```bash
 # Download static binary
@@ -266,6 +277,7 @@ cd /path/to/bootgly
 | `swoole-coroutine` | Swoole Coroutine mode |
 | `roadrunner` | RoadRunner (Go + PHP) |
 | `frankenphp` | FrankenPHP worker mode |
+| `hyperf` | Hyperf (Swoole framework) |
 
 ### Environment variables
 
@@ -366,5 +378,6 @@ kill_port         # Force-kills any process on $PORT
 - **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). FrankenPHP uses `curl` polling instead.
 - **Localhost loopback**: All tests run on `127.0.0.1` — network latency is not a factor.
 - **Swoole extension**: Must be compiled with CLI support. Verify with `php -m | grep swoole`.
+- **Hyperf**: Requires Swoole with `swoole.use_shortname=Off`. Add to `php.ini` before running.
 - **Result variance**: Results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
 - **Warmup**: A 2-second warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.

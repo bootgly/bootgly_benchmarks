@@ -16,9 +16,12 @@ DRIVER_VERSION=$(grep -A1 '"name": "workerman/workerman"' "$WORKERMAN_DIR/compos
 # Match Bootgly's worker count for a fair comparison
 DRIVER_WORKERS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
 [[ "$DRIVER_WORKERS" -lt 1 ]] && DRIVER_WORKERS=1
+DRIVER_WRK_THREADS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
+[[ "$DRIVER_WRK_THREADS" -lt 1 ]] && DRIVER_WRK_THREADS=1
 
 driver_start () {
    cd "$WORKERMAN_DIR" || return 1
+   SERVER_WORKER_NUM="$DRIVER_WORKERS" \
    php "$WORKERMAN_SCRIPT" start -d >/dev/null 2>&1
    wait_for_server
 }

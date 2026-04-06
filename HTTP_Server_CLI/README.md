@@ -247,13 +247,13 @@ cd /path/to/bootgly
 
 ```bash
 # Bootgly only (baseline)
-./bootgly benchmark HTTP_Server_CLI --competitors=bootgly
+./scripts/benchmark HTTP_Server_CLI --competitors=bootgly
 
 # Bootgly vs Workerman
-./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,workerman
+./scripts/benchmark HTTP_Server_CLI --competitors=bootgly,workerman
 
 # Bootgly vs multiple competitors
-./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,workerman,swoole-base,roadrunner
+./scripts/benchmark HTTP_Server_CLI --competitors=bootgly,workerman,swoole-base,roadrunner
 ```
 
 ### Specific scenarios

@@ -30,7 +30,7 @@ driver_start () {
    php bootgly project stop HTTP_Server_CLI >/dev/null 2>&1 || true
    sleep 0.5
    BOOTGLY_WORKERS="$DRIVER_WORKERS" \
-   php bootgly project run HTTP_Server_CLI >/dev/null 2>&1
+   php bootgly project start HTTP_Server_CLI >/dev/null 2>&1
    wait_for_server
 }
 

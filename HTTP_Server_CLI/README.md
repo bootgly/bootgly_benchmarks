@@ -260,10 +260,10 @@ cd /path/to/bootgly
 
 ```bash
 # Run only scenario 1 (static single) and 8 (mixed 8)
-./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=1,8
+./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=1,8
 
 # Run only dynamic routes scenarios
-./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=3,4
+./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=3,4
 ```
 
 ### Available competitor names
@@ -296,13 +296,13 @@ cd /path/to/bootgly
 
 ```bash
 PORT=8080 WRK_THREADS=8 WRK_DURATION=15s \
-   ./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,workerman
+   ./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman
 ```
 
 ### List available scenarios
 
 ```bash
-./bootgly benchmark HTTP_Server_CLI --help
+./scripts/benchmark benchmark HTTP_Server_CLI --help
 ```
 
 ---
@@ -350,7 +350,7 @@ Plain text format, easy to diff or archive.
 
 4. **Run**:
    ```bash
-   ./bootgly benchmark HTTP_Server_CLI --competitors=bootgly,myserver
+   ./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,myserver
    ```
 
 ### Driver interface

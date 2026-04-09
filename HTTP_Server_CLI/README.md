@@ -10,10 +10,13 @@ Unlike simple "Hello, World!" benchmarks, this suite tests **real routing patter
 
 - [Route Specification](#-route-specification)
 - [Benchmark Scenarios](#-benchmark-scenarios)
+- [Runners](#-runners)
 - [Competitors](#-competitors)
 - [Prerequisites](#-prerequisites)
 - [Installation](#-installation)
 - [Running Benchmarks](#-running-benchmarks)
+- [Multi-dimensional Vary](#-multi-dimensional-vary---vary)
+- [Contextual Help](#-contextual-help)
 - [Understanding Results](#-understanding-results)
 - [Adding a New Competitor](#-adding-a-new-competitor)
 - [Environment Notes](#-environment-notes)
@@ -24,7 +27,9 @@ Unlike simple "Hello, World!" benchmarks, this suite tests **real routing patter
 
 Every competitor implements the **same** route set for fair comparison.
 
-### Static Routes (10)
+### Static Routes (100)
+
+The first 10 are named routes:
 
 | Path | Response Body |
 |------|--------------|
@@ -39,7 +44,11 @@ Every competitor implements the **same** route set for fair comparison.
 | `/privacy` | `Privacy` |
 | `/status` | `Status` |
 
-### Dynamic Routes (10)
+Routes 11–100 follow the pattern `/static/N` → `Static N` (e.g. `/static/11` → `Static 11`).
+
+### Dynamic Routes (100)
+
+The first 10 use distinct path prefixes:
 
 | Pattern | Example Path | Response Body |
 |---------|-------------|--------------|
@@ -53,6 +62,8 @@ Every competitor implements the **same** route set for fair comparison.
 | `/invoice/:number` | `/invoice/INV-1` | `Invoice: INV-1` |
 | `/review/:rid` | `/review/R-50` | `Review: R-50` |
 | `/comment/:cid` | `/comment/C-10` | `Comment: C-10` |
+
+Routes 11–100 follow the pattern `/dN/:param` → `D{N}: {param}` (e.g. `/d11/foo` → `D11: foo`).
 
 ### Nested Routes (6) — 2 groups
 
@@ -85,28 +96,61 @@ Every competitor implements the **same** route set for fair comparison.
 
 ## 🎯 Benchmark Scenarios
 
-Each scenario is a [wrk](https://github.com/wg/wrk) Lua script that defines the request distribution.
+Each scenario defines a request distribution. There are two formats — **Lua** scripts (for the WRK runner) and **PHP** scripts (for the TCP_Client runner) — with identical request patterns.
+
+### Scenarios (12)
 
 | # | File | Label | Group | Description |
 |---|------|-------|-------|-------------|
-| 1 | `1.1.1-static_single.lua` | 1 static route | Static | Hits `/` on every request (best-case) |
-| 2 | `1.1.2-static_10.lua` | 10 static routes | Static | Round-robins all 10 static routes |
-| 3 | `1.2.1-dynamic_3.lua` | 3 dynamic routes | Dynamic | `/user/:id`, `/post/:slug`, `/api/v1/:resource` |
-| 4 | `1.2.2-dynamic_10.lua` | 10 dynamic routes | Dynamic | All 10 dynamic routes with varying params |
-| 5 | `1.3.1-catch_all.lua` | Catch-all 404 | Catch-all | All requests hit non-existent paths |
-| 6 | `2.1.1-nested_6.lua` | 6 nested routes | Nested | Admin + Account group routes |
-| 7 | `3.1.1-middleware_3.lua` | 3 middleware routes | Middleware | Protected routes (**Bootgly only**) |
-| 8 | `z.1.1-mixed_8.lua` | Mixed 8 | Mixed | 5 static + 3 dynamic |
-| 9 | `z.1.2-mixed_20.lua` | Mixed 20 | Mixed | 10 static + 10 dynamic |
-| 10 | `z.1.3-full_mix.lua` | Full mix | Mixed | static + dynamic + nested + middleware + 404 |
+| 1 | `1.1.1-static_single` | 1 static route | Static | Hits `/` on every request (best-case) |
+| 2 | `1.1.2-static_10` | 10 static routes | Static | Round-robins all 10 named static routes |
+| 3 | `1.1.3-static_100` | 100 static routes | Static | Round-robins all 100 static routes |
+| 4 | `1.2.1-dynamic_1` | 1 dynamic route | Dynamic | `/user/:id` |
+| 5 | `1.2.2-dynamic_10` | 10 dynamic routes | Dynamic | All 10 named dynamic routes with varying params |
+| 6 | `1.2.3-dynamic_100` | 100 dynamic routes | Dynamic | All 100 dynamic routes with varying params |
+| 7 | `1.3.1-catch_all` | Catch-all 404 | Catch-all | All requests hit non-existent paths |
+| 8 | `2.1.1-nested_6` | 6 nested routes | Nested | Admin + Account group routes |
+| 9 | `3.1.1-middleware_3` | 3 middleware routes | Middleware | Protected routes (**Bootgly only**) |
+| 10 | `z.1.1-mixed_8` | Mixed 8 | Mixed | 5 static + 3 dynamic |
+| 11 | `z.1.2-mixed_20` | Mixed 20 | Mixed | 10 static + 10 dynamic |
+| 12 | `z.1.3-full_mix` | Full mix | Mixed | static + dynamic + nested + middleware + 404 |
+
+File extensions: `.lua` (in `scenarios/`) for WRK runner, `.php` (in `scenarios/php/`) for TCP_Client runner.
 
 ### `@competitors` Tag
 
-Each scenario has a `-- @competitors:` header that controls which competitors run it:
+Each scenario has a `@competitors:` header that controls which competitors run it:
 - `all` — every competitor runs the scenario
 - `bootgly` — only Bootgly runs it (e.g., middleware scenario)
 
 Competitors not listed are **automatically skipped** during the benchmark.
+
+---
+
+## 🔧 Runners
+
+The HTTP_Server_CLI case supports two runners. The runner is selected via `--runner=NAME` (default: `tcp_client`).
+
+### TCP_Client (default)
+
+Bootgly's built-in HTTP load generator. Uses PHP scenarios from `scenarios/php/`. Supports multi-worker forking and HTTP pipelining.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--client-workers=N` | auto | Number of client worker processes |
+| `--connections=N` | `514` | Number of TCP connections |
+| `--duration=N` | `10` | Benchmark duration in seconds |
+| `--pipeline=N` | `1` | HTTP pipelining factor |
+
+### WRK
+
+Wraps the external [wrk](https://github.com/wg/wrk) HTTP benchmarking tool. Uses Lua scenarios from `scenarios/`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--threads=N` | `10` | Number of wrk threads |
+
+> **Note:** `wrk` must be installed separately (see [Prerequisites](#-prerequisites)).
 
 ---
 
@@ -133,10 +177,10 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 |-----------|---------|----------|
 | **PHP** ≥ 8.4 | Server runtime | ✅ |
 | **Composer** | PHP dependency management | ✅ |
-| **wrk** | HTTP benchmarking tool | ✅ |
 | **lsof** | Port detection | ✅ |
 | **curl** | Server readiness check | ✅ |
 | **nproc** | CPU count detection | ✅ |
+| **wrk** | HTTP benchmarking tool | Only for `--runner=wrk` |
 | **Swoole extension** | Swoole / Hyperf benchmarks | Optional |
 | **FrankenPHP binary** | FrankenPHP benchmarks | Optional |
 
@@ -144,31 +188,48 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 
 ## 🔧 Installation
 
-### Automated (recommended)
+### 1. Clone repositories (side by side)
 
 ```bash
-# Install all dependencies
-bash install.sh
-
-# Or install specific competitors
-bash install.sh --roadrunner --workerman
-bash install.sh --wrk
+git clone https://github.com/bootgly/bootgly.git
+git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
-### Manual step-by-step
+Expected layout:
 
-#### 1. Clone repositories
+```
+parent/
+├── bootgly/
+└── bootgly_benchmarks/
+```
+
+### 2. Install competitor dependencies
 
 ```bash
-# Clone Bootgly (the main repo with the benchmark runner)
-git clone --recursive https://github.com/bootgly/bootgly.git
-cd bootgly
+cd bootgly_benchmarks/HTTP_Server_CLI/artifacts
 ```
 
-> The `--recursive` flag pulls the `bootgly_benchmarks` submodule automatically.
-> If you already have the repo: `git submodule update --init --recursive`
+#### RoadRunner
 
-#### 2. Install wrk
+```bash
+cd roadrunner && composer install && php ./vendor/bin/rr get-binary && cd ..
+```
+
+#### Workerman
+
+```bash
+cd workerman && composer install && cd ..
+```
+
+#### Hyperf
+
+```bash
+cd hyperf && composer install && cd ..
+```
+
+> **Note:** Hyperf requires the Swoole extension with `swoole.use_shortname=Off` in your `php.ini`.
+
+### 3. Install wrk (only for `--runner=wrk`)
 
 ```bash
 # Debian/Ubuntu
@@ -177,55 +238,22 @@ sudo apt-get install wrk
 # macOS
 brew install wrk
 
-# Build from source (if unavailable in package manager)
+# Build from source
 git clone https://github.com/wg/wrk.git
 cd wrk && make -j$(nproc) && sudo cp wrk /usr/local/bin/
 ```
 
-#### 3. Install RoadRunner
+### 4. Install Swoole (optional)
 
 ```bash
-cd scripts/benchmarks/bootgly_benchmarks/HTTP_Server_CLI/artifacts/roadrunner
-composer install
-php ./vendor/bin/rr get-binary
-cd -
-```
-
-#### 4. Install Workerman
-
-```bash
-cd scripts/benchmarks/bootgly_benchmarks/HTTP_Server_CLI/artifacts/workerman
-composer install
-cd -
-```
-
-#### 5. Install Hyperf
-
-```bash
-cd scripts/benchmarks/HTTP_Server_CLI/artifacts/hyperf
-composer install
-cd -
-```
-
-> **Note:** Hyperf requires the Swoole extension with `swoole.use_shortname=Off` in your `php.ini`.
-
-#### 6. Install Swoole (optional)
-
-```bash
-# Via PECL
 pecl install swoole
-
-# Or build from source
-git clone https://github.com/swoole/swoole-src.git
-cd swoole-src && phpize && ./configure && make -j$(nproc) && sudo make install
 ```
 
 Add `extension=swoole.so` to your `php.ini`.
 
-#### 7. Install FrankenPHP (optional)
+### 5. Install FrankenPHP (optional)
 
 ```bash
-# Download static binary
 curl -fsSL https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64 \
    -o /usr/local/bin/frankenphp
 chmod +x /usr/local/bin/frankenphp
@@ -237,7 +265,7 @@ See: https://frankenphp.dev/docs/install
 
 ## 🚀 Running Benchmarks
 
-The benchmark runner lives in the **bootgly** repository:
+All commands are run from the **bootgly** directory:
 
 ```bash
 cd /path/to/bootgly
@@ -246,25 +274,67 @@ cd /path/to/bootgly
 ### Basic usage
 
 ```bash
+# All competitors, all scenarios (TCP_Client runner, default)
+./bootgly test benchmark HTTP_Server_CLI
+
 # Bootgly only (baseline)
-./scripts/benchmark HTTP_Server_CLI --competitors=bootgly
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly
 
 # Bootgly vs Workerman
-./scripts/benchmark HTTP_Server_CLI --competitors=bootgly,workerman
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman
 
 # Bootgly vs multiple competitors
-./scripts/benchmark HTTP_Server_CLI --competitors=bootgly,workerman,swoole-base,roadrunner
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman,swoole-base,roadrunner
 ```
 
-### Specific scenarios
+### Selecting a runner
 
 ```bash
-# Run only scenario 1 (static single) and 8 (mixed 8)
-./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=1,8
+# Use wrk runner (requires wrk installed)
+./bootgly test benchmark HTTP_Server_CLI --runner=wrk
 
-# Run only dynamic routes scenarios
-./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=3,4
+# Use TCP_Client runner (default, no external dependency)
+./bootgly test benchmark HTTP_Server_CLI --runner=tcp_client
 ```
+
+### Filtering scenarios
+
+```bash
+# Run only scenario 1 (static single) and 10 (mixed 8)
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=1,10
+
+# Run only the 100-route scenarios (3 and 6)
+./bootgly test benchmark HTTP_Server_CLI --scenarios=3,6
+```
+
+### Runner-specific options
+
+```bash
+# TCP_Client: custom connections and duration
+./bootgly test benchmark HTTP_Server_CLI --connections=256 --duration=15
+
+# TCP_Client: with pipelining and explicit client workers
+./bootgly test benchmark HTTP_Server_CLI --pipeline=4 --client-workers=8
+
+# WRK: custom threads
+./bootgly test benchmark HTTP_Server_CLI --runner=wrk --threads=8
+```
+
+### Case-specific options
+
+```bash
+# Set server workers explicitly
+./bootgly test benchmark HTTP_Server_CLI --server-workers=4
+```
+
+### Global options
+
+| Option | Description |
+|--------|-------------|
+| `--runner=NAME` | Select runner (`tcp_client`, `wrk`) |
+| `--competitors=NAME,...` | Filter competitors by name |
+| `--scenarios=N,...` | Filter scenarios by 1-based index |
+| `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see below) |
 
 ### Available competitor names
 
@@ -279,31 +349,69 @@ cd /path/to/bootgly
 | `frankenphp` | FrankenPHP worker mode |
 | `hyperf` | Hyperf (Swoole framework) |
 
-### Environment variables
+---
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8082` | Server listen port |
-| `WRK_THREADS` | `10` | wrk threads |
-| `WRK_CONNECTIONS` | `514` | wrk connections |
-| `WRK_DURATION` | `10s` | wrk test duration |
-| `WARMUP_DURATION` | `2s` | Warmup duration before each benchmark |
-| `WARMUP_THREADS` | `2` | Warmup threads |
-| `WARMUP_CONNECTIONS` | `64` | Warmup connections |
-| `READY_TIMEOUT` | `10` | Server start timeout (seconds) |
+## 📐 Multi-dimensional Vary (`--vary`)
 
-### Example
+The `--vary` option runs the benchmark across a **cartesian product** of parameter values, producing one round per combination.
+
+### Syntax
 
 ```bash
-PORT=8080 WRK_THREADS=8 WRK_DURATION=15s \
-   ./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,workerman
+--vary=key1:value1,key2:value2,...
 ```
 
-### List available scenarios
+### Available dimensions
+
+| Key | Runner | Description |
+|-----|--------|-------------|
+| `server-workers` | Both | Number of server worker processes |
+| `connections` | TCP_Client | Number of TCP connections |
+| `client-workers` | TCP_Client | Number of client worker processes |
+| `threads` | WRK | Number of wrk threads |
+
+### Examples
 
 ```bash
-./scripts/benchmark benchmark HTTP_Server_CLI --help
+# 2D: vary server workers and connections (TCP_Client)
+./bootgly test benchmark HTTP_Server_CLI \
+   --vary=server-workers:4,connections:256
+
+# 3D: full cartesian product (TCP_Client)
+./bootgly test benchmark HTTP_Server_CLI \
+   --vary=server-workers:4,connections:256,client-workers:8
+
+# 2D: vary server workers and threads (WRK)
+./bootgly test benchmark HTTP_Server_CLI --runner=wrk \
+   --vary=server-workers:4,threads:8
 ```
+
+Round headers show only the dimensions that are actually varying (e.g. `4sw/256c` instead of `4sw/256c/0cw`).
+
+---
+
+## 💡 Contextual Help
+
+The benchmark CLI provides a two-tier help system:
+
+### Tier 1 — List available cases
+
+```bash
+./bootgly test benchmark --help
+```
+
+Shows all discovered benchmark cases.
+
+### Tier 2 — Case-specific options
+
+```bash
+./bootgly test benchmark HTTP_Server_CLI --help
+```
+
+Shows:
+- Case configuration (from `@.php`)
+- Runner-specific options (from the selected runner's `options()` method)
+- Case-local options (from `options.php`, e.g. `--server-workers`)
 
 ---
 
@@ -338,46 +446,55 @@ Plain text format, easy to diff or archive.
 
 ## 🔌 Adding a New Competitor
 
-1. **Copy the template**:
-   ```bash
-   cp competitors/Template.example.sh competitors/myserver/myserver.sh
-   ```
+### 1. Create the competitor script
 
-2. **Create a route handler** in `artifacts/myserver/` with the full route set
-   (see any existing artifact for the pattern: 10 static + 10 dynamic + 6 nested + 3 middleware + catch-all)
+Create `competitors/myserver.php` — this script starts the HTTP server and blocks until killed:
 
-3. **Edit the driver** — implement `driver_start()` and `driver_stop()`, set `DRIVER_NAME`, `DRIVER_VERSION`, `DRIVER_WORKERS`
+```php
+<?php
+// Start your server on $port with $workers processes
+// The runner will call this script as a subprocess
+// and kill it when done.
+```
 
-4. **Run**:
-   ```bash
-   ./scripts/benchmark benchmark HTTP_Server_CLI --competitors=bootgly,myserver
-   ```
+See existing scripts in `competitors/` for the exact pattern (start server, listen on `getenv('PORT')`, use `getenv('WORKERS')` for worker count).
 
-### Driver interface
+### 2. Create the server artifact
+
+Create `artifacts/myserver/` with the full route implementation:
+- 100 static routes + 100 dynamic routes + 6 nested + 3 middleware + catch-all
+- See any existing artifact directory for the route specification
+
+### 3. Register in `@.php`
+
+Add a `Competitor` entry to `@.php`:
+
+```php
+$Runner->add(new Competitor(
+   name: 'MyServer',
+   version: fn () => 'v1.0.0',
+   script: __DIR__ . '/competitors/myserver.php',
+));
+```
+
+The `name` parameter is used as the CLI filter value (lowercased): `--competitors=myserver`.
+
+### 4. Run
 
 ```bash
-# Required exports
-DRIVER_NAME="MyServer"
-DRIVER_VERSION="1.0.0"
-DRIVER_WORKERS=$(( $(nproc) / 2 ))
-
-# Required functions
-driver_start ()   # Start server, block until ready
-driver_stop ()    # Stop server, release port
-
-# Available helpers (from benchmark runner)
-wait_for_server   # Polls $PORT until server is listening
-kill_port         # Force-kills any process on $PORT
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,myserver
 ```
 
 ---
 
 ## ⚠️ Environment Notes
 
-- **CPU balance**: Both `wrk` and the server share CPU. The default uses `nproc / 2` workers to leave cores for `wrk`.
-- **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). FrankenPHP uses `curl` polling instead.
+- **CPU balance**: Both the load generator and the server share CPU. The default uses `nproc / 2` workers to leave cores for the load generator.
+- **TCP_Client runner**: Uses Bootgly's built-in TCP client — no external tooling required. Scenarios are PHP scripts under `scenarios/php/`.
+- **WRK runner**: Requires the `wrk` binary installed. Scenarios are Lua scripts under `scenarios/`.
+- **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). The runner uses `curl` polling as fallback.
 - **Localhost loopback**: All tests run on `127.0.0.1` — network latency is not a factor.
 - **Swoole extension**: Must be compiled with CLI support. Verify with `php -m | grep swoole`.
 - **Hyperf**: Requires Swoole with `swoole.use_shortname=Off`. Add to `php.ini` before running.
 - **Result variance**: Results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
-- **Warmup**: A 2-second warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.
+- **Warmup**: A warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.

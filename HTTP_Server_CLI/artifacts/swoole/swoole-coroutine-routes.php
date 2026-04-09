@@ -7,7 +7,7 @@
  * Each forked process runs its own coroutine HTTP server on the same port.
  *
  * Same route set as all benchmark competitors:
- * 10 static + 10 dynamic + 6 nested + 3 middleware + catch-all 404.
+ * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * Usage: php swoole-coroutine-routes.php
  */
@@ -33,6 +33,10 @@ $static = [
    '/privacy' => 'Privacy',
    '/status'  => 'Status',
 ];
+// Extra static routes (11..100)
+for ($i = 11; $i <= 100; $i++) {
+   $static["/static/{$i}"] = "Static {$i}";
+}
 
 // Write PID file for daemon management
 file_put_contents(__DIR__ . '/swoole-coroutine.pid', getmypid());
@@ -110,6 +114,12 @@ run(function () use ($host, $port, $static) {
 
       if ($n === 3 && $parts[0] === 'api' && $parts[1] === 'v1') {
          $response->end('API: ' . $parts[2]);
+         return;
+      }
+
+      // Extra dynamic routes (d11..d100)
+      if ($n === 2 && $parts[0][0] === 'd' && ctype_digit(substr($parts[0], 1))) {
+         $response->end('Dynamic ' . $parts[1]);
          return;
       }
 

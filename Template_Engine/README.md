@@ -2,7 +2,49 @@
 
 In this benchmark, we will compare the performance of the `foreach` directive in different template engines. The `foreach` directive is commonly used to iterate over a collection of data and generate dynamic content.
 
-## 🔍 Context
+## � Quick Start
+
+```bash
+# Clone both repositories side by side
+git clone https://github.com/bootgly/bootgly.git
+git clone https://github.com/bootgly/bootgly_benchmarks.git
+
+# Install Laravel Blade dependency
+cd bootgly_benchmarks/Template_Engine/artifacts/laravel
+composer install
+cd ../../../..
+
+# Run the benchmark
+cd bootgly
+./bootgly test benchmark Template_Engine
+```
+
+This case uses the **Code** runner, which executes each competitor as a subprocess and measures time and memory.
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--competitors=NAME,...` | all | Filter competitors (`bootgly`, `laravel`) |
+| `--iterations=N` | `1` | Number of iterations per competitor |
+| `--timeout=N` | `120` | Timeout in seconds per execution |
+| `--warmup=N` | `0` | Warmup iterations (discarded) |
+
+### Example
+
+```bash
+./bootgly test benchmark Template_Engine --competitors=bootgly,laravel --iterations=3
+```
+
+### Help
+
+```bash
+./bootgly test benchmark Template_Engine --help
+```
+
+---
+
+## �🔍 Context
 
 The goal is to determine which template engine performs the best in terms of speed and efficiency when iterating over a large collection of data.
 
@@ -42,178 +84,6 @@ ABI
 
 ---
 
-## 📋 Instructions
-
-<details>
-  <summary><b>🥇 Benchmark on Bootgly</b></summary><br>
-
-1) Clone the Bootgly base platform repository:
-
-```bash
-git clone https://github.com/bootgly/bootgly.git
-```
-
----
-
-2) Change directory to `bootgly`:
-
-```bash
-cd bootgly
-```
-
----
-
-3) Create a custom user script called `foreach-bootgly_template.php` in `scripts/`:
-
-```bash
-nano scripts/foreach-bootgly_template.php
-```
-
----
-
-4) Put the code bellow:
-
-```php
-<?php
-
-include __DIR__ . '/../autoload.php';
-
-use Bootgly\ABI\Templates\Template;
-
-
-$Template = new Template(
-   <<<'TEMPLATE'
-   <?php
-   $started = microtime(true);
-   ?>
-
-   @foreach ($items as $item):
-   @foreach;
-
-   <?php
-   $finished = microtime(true);
-
-   echo ($finished - $started) . PHP_EOL;
-   ?>
-   TEMPLATE
-);
-$Template->render([
-   'items' => range(0, 1000000)
-]);
-echo $Template->output;
-?>
-```
-
----
-
-5) Register the script `foreach-bootgly_template.php` on script bootstrap file (`scripts/@.php`):
-
-```bash
-nano scripts/@.php
-```
-
-```php
-<?php
-return [
-   'scripts' => [
-      'built-in' => [ # Relative to scripts/ (bootgly's root directory)
-         'http-server-cli',
-         'tcp-server-cli',
-         'tcp-client-cli',
-      ],
-      'imported' => [ # Relative to working directory (your root directory)
-         'vendor/bin/phpstan'
-      ],
-      'user' => [ # Relative to scripts/ (your working directory)
-         // Define your scripts filenames here
-         'foreach-bootgly_template.php' # <<<------ HERE
-      ]
-   ]
-];
-```
-
----
-
-6) Run the script
-
-```bash
-php scripts/foreach-bootgly_template.php
-```
-
-</details>
-
-
-<details>
-  <summary><b>🥈 Benchmark on Laravel</b></summary><br>
-
-1) Create a new project using Composer:
-
-```bash
-composer create-project --prefer-dist laravel/laravel laravel
-```
-
----
-
-2) Change directory to `laravel`:
-
-```bash
-cd laravel
-```
-
----
-
-3) Edit the Laravel welcome template `welcome.blade.php`:
-
-```bash
-nano resources/views/welcome.blade.php
-```
-
----
-
-4) Replace the `welcome.blade.php` content with this:
-
-```php
-<?php
-$started = microtime(true);
-?>
-
-@foreach ($items as $item)
-@endforeach
-
-<?php
-$finished = microtime(true);
-
-echo ($finished - $started) . PHP_EOL;
-?>
-```
-
----
-
-5) Edit the web route `/` to pass `$items` to template:
-
-```bash
-nano routes/web.php
-```
-
-```php
-Route::get('/', function () {
-   $items = range(0, 1000000);
-   return view('welcome',
-   [
-      'items' => $items,
-   ]);
-});
-```
-
-6) Run the script `public/index.php` to execute the web route `/`:
-
-```bash
-php public/index.php
-```
-
-</details>
-
----
 
 ## 📊 Results
 

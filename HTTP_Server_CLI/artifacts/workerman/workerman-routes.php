@@ -16,25 +16,29 @@ $http_worker->onWorkerStart = function () {
     });
 };
 
-$http_worker->onMessage = function ($connection, Request $request) {
+// Static routes
+$static = [
+    '/'        => 'Home',
+    '/about'   => 'About',
+    '/contact' => 'Contact',
+    '/blog'    => 'Blog',
+    '/pricing' => 'Pricing',
+    '/docs'    => 'Docs',
+    '/faq'     => 'FAQ',
+    '/terms'   => 'Terms',
+    '/privacy' => 'Privacy',
+    '/status'  => 'Status',
+];
+// Extra static routes (11..100)
+for ($i = 11; $i <= 100; $i++) {
+    $static["/static/{$i}"] = "Static {$i}";
+}
+
+$http_worker->onMessage = function ($connection, Request $request) use ($static) {
     $path = $request->path();
     $headers = [
         'Content-Type' => 'text/plain',
         'Date'         => Header::$date
-    ];
-
-    // Static routes
-    $static = [
-        '/'        => 'Home',
-        '/about'   => 'About',
-        '/contact' => 'Contact',
-        '/blog'    => 'Blog',
-        '/pricing' => 'Pricing',
-        '/docs'    => 'Docs',
-        '/faq'     => 'FAQ',
-        '/terms'   => 'Terms',
-        '/privacy' => 'Privacy',
-        '/status'  => 'Status',
     ];
 
     if (isset($static[$path])) {
@@ -88,6 +92,12 @@ $http_worker->onMessage = function ($connection, Request $request) {
 
     if ($n === 3 && $parts[0] === 'api' && $parts[1] === 'v1') {
         $connection->send(new Response(200, $headers, 'API: ' . $parts[2]));
+        return;
+    }
+
+    // Extra dynamic routes (d11..d100)
+    if ($n === 2 && $parts[0][0] === 'd' && ctype_digit(substr($parts[0], 1))) {
+        $connection->send(new Response(200, $headers, 'Dynamic ' . $parts[1]));
         return;
     }
 

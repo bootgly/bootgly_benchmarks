@@ -3,7 +3,7 @@
  * Hyperf benchmark routes.
  *
  * Same route set as all benchmark competitors:
- * 10 static + 10 dynamic + 6 nested + 3 middleware + catch-all 404.
+ * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * All routes return plain text responses matching the exact format
  * of other competitors. No views, no JSON — just text/plain.
@@ -29,6 +29,14 @@ $statics = [
 
 foreach ($statics as $path => $body) {
    Router::get($path, function () use ($body) {
+      return $body;
+   });
+}
+
+// --- Extra static routes (11..100) ---
+for ($i = 11; $i <= 100; $i++) {
+   $body = "Static {$i}";
+   Router::get("/static/{$i}", function () use ($body) {
       return $body;
    });
 }
@@ -95,3 +103,10 @@ Router::get('/protected/settings', function () {
 Router::get('/protected/profile', function () {
    return 'Protected Profile';
 });
+
+// --- Extra dynamic routes (d11..d100) ---
+for ($i = 11; $i <= 100; $i++) {
+   Router::get("/d{$i}/{param}", function (string $param) {
+      return 'Dynamic ' . $param;
+   });
+}

@@ -3,7 +3,7 @@
  * RoadRunner HTTP Worker — Benchmark Routes
  *
  * Same route set as the Bootgly, Swoole and Workerman benchmarks:
- * 10 static + 10 dynamic + 6 nested + 3 middleware + catch-all 404.
+ * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * Usage: ./rr serve -c .rr.yaml
  * (This worker is managed by the RoadRunner Go binary via goridge pipes)
@@ -32,6 +32,10 @@ $static = [
    '/privacy' => 'Privacy',
    '/status'  => 'Status',
 ];
+// Extra static routes (11..100)
+for ($i = 11; $i <= 100; $i++) {
+   $static["/static/{$i}"] = "Static {$i}";
+}
 
 $headers = ['Content-Type' => 'text/plain'];
 
@@ -91,6 +95,12 @@ while ($request = $psr7->waitRequest()) {
 
       if ($n === 3 && $parts[0] === 'api' && $parts[1] === 'v1') {
          $psr7->respond(new Response(200, $headers, 'API: ' . $parts[2]));
+         continue;
+      }
+
+      // Extra dynamic routes (d11..d100)
+      if ($n === 2 && $parts[0][0] === 'd' && ctype_digit(substr($parts[0], 1))) {
+         $psr7->respond(new Response(200, $headers, 'Dynamic ' . $parts[1]));
          continue;
       }
 

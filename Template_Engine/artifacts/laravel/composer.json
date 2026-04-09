@@ -1,0 +1,7 @@
+{
+    "require": {
+        "illuminate/view": "*",
+        "illuminate/filesystem": "*",
+        "illuminate/events": "*"
+    }
+}

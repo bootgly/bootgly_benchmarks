@@ -27,16 +27,16 @@ DRIVER_WRK_THREADS=$(( $(nproc 2>/dev/null || echo 1) / 2 ))
 driver_start () {
    cd "$BOOTGLY_DIR" || return 1
    # Stop any existing instance first (stale PID files cause "already running" errors)
-   php bootgly project stop HTTP_Server_CLI >/dev/null 2>&1 || true
+   php bootgly project Demo stop --HTTP_Server_CLI >/dev/null 2>&1 || true
    sleep 0.5
    BOOTGLY_WORKERS="$DRIVER_WORKERS" \
-   php bootgly project start HTTP_Server_CLI >/dev/null 2>&1
+   php bootgly project Demo start --HTTP_Server_CLI >/dev/null 2>&1
    wait_for_server
 }
 
 driver_stop () {
    cd "$BOOTGLY_DIR" || return 1
-   php bootgly project stop HTTP_Server_CLI >/dev/null 2>&1 || true
+   php bootgly project Demo stop --HTTP_Server_CLI >/dev/null 2>&1 || true
    sleep 1
    kill_port
 }

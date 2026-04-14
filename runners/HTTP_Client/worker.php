@@ -3,13 +3,13 @@
  * --------------------------------------------------------------------------
  * Bootgly PHP Framework — Benchmark Worker
  * --------------------------------------------------------------------------
- * Standalone subprocess that generates HTTP load using TCP_Client_CLI.
- * Spawned by tcp_client runner per scenario.
+ * Standalone subprocess that generates HTTP load using HTTP_Client_CLI.
+ * Spawned by http_client runner per scenario.
  *
  * Usage:
  *   php worker.php --host=127.0.0.1 --port=8082 --connections=514
  *                  --duration=10 --paths-file=/tmp/paths.json
- *                  [--workers=4] [--pipeline=16]
+ *                  [--workers=4]
  *
  * Output: JSON line on stdout with benchmark results.
  * --------------------------------------------------------------------------
@@ -46,7 +46,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 
 use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Logger;
-use Bootgly\WPI\Interfaces\TCP_Client_CLI;
+use Bootgly\WPI\Nodes\HTTP_Client_CLI;
 
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,6 @@ $opts = getopt('', [
    'duration:',
    'paths-file:',
    'workers:',
-   'pipeline:',
 ]);
 
 /** @var array<string, string> $opts */
@@ -68,8 +67,6 @@ $port        = (int) ($opts['port']        ?? 8082);
 $connections = (int) ($opts['connections'] ?? 514);
 $duration    = (int) ($opts['duration']    ?? 10);
 $pathsFile   = $opts['paths-file']  ?? '';
-$pipeline    = (int) ($opts['pipeline']    ?? 1);
-if ($pipeline < 1) $pipeline = 1;
 
 if ($pathsFile === '' || !\file_exists($pathsFile)) {
    \fwrite(\STDERR, "ERROR: --paths-file is required and must exist.\n");
@@ -78,7 +75,7 @@ if ($pathsFile === '' || !\file_exists($pathsFile)) {
 
 
 // ---------------------------------------------------------------------------
-// Load paths and pre-build HTTP request strings
+// Load scenario data
 // ---------------------------------------------------------------------------
 $json = file_get_contents($pathsFile);
 if ($json === false) {
@@ -103,13 +100,6 @@ $scenario = $decoded;
 $method    = $scenario['method'];
 $paths     = $scenario['paths'];
 $pathCount = count($paths);
-
-// @ Pre-build raw HTTP request bytes (zero allocation in hot path)
-/** @var array<string> $requests */
-$requests = [];
-foreach ($paths as $path) {
-   $requests[] = "{$method} {$path} HTTP/1.1\r\nHost: {$host}:{$port}\r\nConnection: keep-alive\r\n\r\n";
-}
 
 
 // ---------------------------------------------------------------------------
@@ -138,35 +128,17 @@ Logger::$display = Logger::DISPLAY_NONE;
 
 
 // ---------------------------------------------------------------------------
-// Pre-build pipeline burst strings (Phase 3: burst N requests per write)
-// ---------------------------------------------------------------------------
-/** @var array<string> $pipelinedRequests */
-$pipelinedRequests = [];
-for ($i = 0; $i < $pathCount; $i++) {
-   $burst = '';
-   for ($j = 0; $j < $pipeline; $j++) {
-      $burst .= $requests[($i * $pipeline + $j) % $pathCount];
-   }
-   $pipelinedRequests[] = $burst;
-}
-$pipelinePathCount = count($pipelinedRequests);
-
-
-// ---------------------------------------------------------------------------
-// Worker function: runs a single-process TCP Client benchmark
+// Worker function: runs a single-process HTTP Client benchmark
 // ---------------------------------------------------------------------------
 /**
- * @param array<string> $requests Individual HTTP request strings.
- * @param array<string> $pipelinedRequests Pre-built initial burst strings (N requests each).
+ * @param array<string> $paths Scenario paths.
  */
 function runWorker (
    string $host, int $port, int $workerConnections, int $duration,
-   array $requests, int $pathCount,
-   array $pipelinedRequests, int $pipelinePathCount, int $pipeline,
+   string $method, array $paths, int $pathCount,
    ?string $statsFile
 ): void {
    $responsesReceived = 0;
-   $bytesRead         = 0;
    $requestIndex      = 0;
    $startTime         = 0.0;
    $latencySum        = 0.0;
@@ -174,8 +146,8 @@ function runWorker (
    /** @var array<int,float> $writeTimes */
    $writeTimes        = [];
 
-   $Client = new TCP_Client_CLI(TCP_Client_CLI::MODE_DEFAULT);
-   // Unlock immediately — lock is for singleton enforcement, not needed for benchmark workers
+   // @ Bootstrap HTTP Client
+   $Client = new HTTP_Client_CLI;
    /** @var \Bootgly\ACI\Process $Process */
    $Process = $Client->__get('Process');
    $Process->State->lock(LOCK_UN);
@@ -186,67 +158,15 @@ function runWorker (
       workers: 0,
    );
 
+   // @ Register HTTP hooks
    $Client->on(
-      instance: function (TCP_Client_CLI $Client)
-         use ($workerConnections, $requests, $pathCount,
-              $pipelinedRequests, $pipelinePathCount, $pipeline, $duration,
-              &$responsesReceived, &$bytesRead, &$requestIndex, &$startTime,
-              &$latencySum, &$latencyCount, &$writeTimes)
+      instance: function (HTTP_Client_CLI $Client)
+         use ($method, $paths, $pathCount, $workerConnections, $duration, &$requestIndex, &$startTime)
       {
-         TCP_Client_CLI::$onConnect = function ($Socket, $Connection)
-            use ($pipelinedRequests, $pipelinePathCount, &$requestIndex)
-         {
-            // @ Fill pipeline: send initial burst of N requests
-            $Connection->output = $pipelinedRequests[$requestIndex % $pipelinePathCount];
-            $requestIndex++;
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
-         };
+         // @ Prepare initial request
+         $Client->request($method, $paths[$requestIndex++ % $pathCount]);
 
-         TCP_Client_CLI::$onWrite = function ($Socket, $Connection, $Package)
-            use (&$writeTimes)
-         {
-            $writeTimes[(int) $Socket] = microtime(true);
-            // @ Switch to read mode (remove from writes to prevent duplicate sends)
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_WRITE);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
-         };
-
-         TCP_Client_CLI::$onRead = function ($Socket, $Connection, $Package)
-            use ($requests, $pathCount, $pipeline, &$requestIndex, &$responsesReceived, &$bytesRead,
-                 &$latencySum, &$latencyCount, &$writeTimes)
-         {
-            $input = $Package->input;
-            $count = substr_count($input, "HTTP/1.");
-            $responsesReceived += $count;
-            $bytesRead += \strlen($input);
-
-            $socketId = (int) $Socket;
-            if (isset($writeTimes[$socketId])) {
-               $latency = microtime(true) - $writeTimes[$socketId];
-               $latencySum += $latency * $count;
-               $latencyCount += $count;
-               unset($writeTimes[$socketId]);
-            }
-
-            // @ Replenish pipeline: send exactly $count requests to replace received responses
-            if ($pipeline > 1) {
-               $burst = '';
-               for ($i = 0; $i < $count; $i++) {
-                  $burst .= $requests[$requestIndex % $pathCount];
-                  $requestIndex++;
-               }
-               $Connection->output = $burst;
-            } else {
-               $Connection->output = $requests[$requestIndex % $pathCount];
-               $requestIndex++;
-            }
-
-            // @ Switch to write mode (remove from reads to prevent being in both sets)
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
-         };
-
-         // @ Open connections
+         // @ Open connections (auto-sends the pending request on each)
          for ($i = 0; $i < $workerConnections; $i++) {
             $socket = $Client->connect();
             if ($socket === false) break;
@@ -259,23 +179,45 @@ function runWorker (
          Timer::add(
             interval: $duration,
             handler: function () {
-               TCP_Client_CLI::$Event->destroy();
+               HTTP_Client_CLI::$Event->destroy();
             },
             persistent: false,
          );
 
          // @ Enter event loop (blocks until Timer destroys it)
-         TCP_Client_CLI::$Event->loop();
+         HTTP_Client_CLI::$Event->loop();
       },
+      write: function ($Socket)
+         use (&$writeTimes, &$latencySum, &$latencyCount)
+      {
+         $socketId = (int) $Socket;
+         $now = microtime(true);
+
+         // @ Compute latency from previous request on this socket
+         if (isset($writeTimes[$socketId])) {
+            $latencySum += $now - $writeTimes[$socketId];
+            $latencyCount++;
+         }
+
+         $writeTimes[$socketId] = $now;
+      },
+      response: function ()
+         use ($Client, $method, $paths, $pathCount, &$requestIndex, &$responsesReceived)
+      {
+         $responsesReceived++;
+
+         // @ Queue next request (auto-sent by HTTP_Client_CLI)
+         $Client->request($method, $paths[$requestIndex++ % $pathCount]);
+      }
    );
 
    $Client->start();
 
    // @ Calculate results
    $elapsed = microtime(true) - $startTime;
+   $bytesRead = HTTP_Client_CLI::$bytesReceived;
 
    if ($statsFile !== null) {
-      // Multi-worker mode: write stats to temp file for parent aggregation
       file_put_contents($statsFile, json_encode([
          'responses' => $responsesReceived,
          'bytes_read' => $bytesRead,
@@ -284,7 +226,6 @@ function runWorker (
          'latency_count' => $latencyCount,
       ]));
    } else {
-      // Single-worker mode: output directly
       outputResults($responsesReceived, $bytesRead, $elapsed, $latencySum, $latencyCount);
    }
 }
@@ -308,9 +249,7 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
    // @ Format latency
    $latencyStr = null;
    if ($avgLatency !== null) {
-      if ($avgLatency >= 1.0) {
-         $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
-      } elseif ($avgLatency >= 0.001) {
+      if ($avgLatency >= 0.001) {
          $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
       } else {
          $latencyStr = \number_format($avgLatency * 1_000_000, 2) . 'us';
@@ -331,8 +270,7 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
 if ($requestedWorkers <= 1) {
    // @ Single-worker: no fork, run directly
    runWorker($host, $port, $connectionsPerWorker, $duration,
-             $requests, $pathCount,
-             $pipelinedRequests, $pipelinePathCount, $pipeline, null);
+             $method, $paths, $pathCount, null);
    exit(0);
 }
 
@@ -348,8 +286,7 @@ for ($w = 0; $w < $requestedWorkers; $w++) {
       // Child process
       $statsFile = "{$statsBase}" . \getmypid() . '.json';
       runWorker($host, $port, $connectionsPerWorker, $duration,
-                $requests, $pathCount,
-                $pipelinedRequests, $pipelinePathCount, $pipeline, $statsFile);
+                $method, $paths, $pathCount, $statsFile);
       exit(0);
    } elseif ($pid > 0) {
       $childPids[] = $pid;

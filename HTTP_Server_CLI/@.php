@@ -12,14 +12,15 @@ use Bootgly\ACI\Tests\Benchmark\Competitor;
 $runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'tcp_client');
 
 $runnerFile = match ($runnerType) {
-   'tcp_client' => 'TCP_Client',
-   'wrk'        => 'WRK',
-   default      => ucfirst($runnerType),
+   'tcp_client'  => 'TCP_Client',
+   'http_client' => 'HTTP_Client',
+   'wrk'         => 'WRK',
+   default       => ucfirst($runnerType),
 };
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 
 // @ Configure per runner type
-if ($runnerType === 'tcp_client') {
+if ($runnerType === 'tcp_client' || $runnerType === 'http_client') {
    $Runner->port = 8082;
    $Runner->connections = 514;
    $Runner->duration = 10;

@@ -65,6 +65,12 @@ return new class (
       if (isset($options['pipeline'])) {
          $this->pipeline = (int) $options['pipeline'];
       }
+      if (isset($options['server-workers'])) {
+         $serverWorkers = (int) $options['server-workers'];
+         foreach ($this->competitors as $Competitor) {
+            $Competitor->workers = $serverWorkers;
+         }
+      }
    }
    public function options (): array
    {

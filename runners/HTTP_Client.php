@@ -61,6 +61,12 @@ return new class (
       if (isset($options['client-workers'])) {
          $this->workers = (int) $options['client-workers'];
       }
+      if (isset($options['server-workers'])) {
+         $serverWorkers = (int) $options['server-workers'];
+         foreach ($this->competitors as $Competitor) {
+            $Competitor->workers = $serverWorkers;
+         }
+      }
    }
    public function options (): array
    {

@@ -60,6 +60,12 @@ return new class (
       if (isset($options['threads'])) {
          $this->threads = (int) $options['threads'];
       }
+      if (isset($options['server-workers'])) {
+         $serverWorkers = (int) $options['server-workers'];
+         foreach ($this->competitors as $Competitor) {
+            $Competitor->workers = $serverWorkers;
+         }
+      }
    }
    public function options (): array
    {

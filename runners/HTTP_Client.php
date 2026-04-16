@@ -176,8 +176,8 @@ return new class (
       $totalScenarios = count($filteredScenarios);
 
       foreach ($this->competitors as $Competitor) {
-         // ? Filter (case-insensitive)
-         if ($Configs->competitors !== null && !in_array(strtolower($Competitor->name), array_map(strtolower(...), $Configs->competitors))) {
+         // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
+         if ($Configs->competitors !== null && !in_array(Configs::slug($Competitor->name), array_map(Configs::slug(...), $Configs->competitors))) {
             continue;
          }
 

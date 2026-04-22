@@ -1,15 +1,18 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly PHP Framework — Benchmark Worker
+ * Bootgly PHP Framework — UDP_Raw Benchmark Worker
  * --------------------------------------------------------------------------
- * Standalone subprocess that generates HTTP load using TCP_Client_CLI.
- * Spawned by tcp_client runner per scenario.
+ * Standalone subprocess that generates raw UDP load using UDP_Client_CLI.
+ * Spawned by UDP_Raw runner per scenario.
  *
  * Usage:
- *   php worker.php --host=127.0.0.1 --port=8082 --connections=514
- *                  --duration=10 --paths-file=/tmp/paths.json
- *                  [--workers=4] [--pipeline=16]
+ *   php worker.php --host=127.0.0.1 --port=8084 --connections=514
+ *                  --duration=10 --scenario-file=/tmp/scenario.json
+ *                  [--workers=4]
+ *
+ * Scenario JSON format:
+ *   {"message": "PING\n"}
  *
  * Output: JSON line on stdout with benchmark results.
  * --------------------------------------------------------------------------
@@ -46,7 +49,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 
 use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Logger;
-use Bootgly\WPI\Interfaces\TCP_Client_CLI;
+use Bootgly\WPI\Interfaces\UDP_Client_CLI;
 
 
 // ---------------------------------------------------------------------------
@@ -57,65 +60,49 @@ $opts = getopt('', [
    'port:',
    'connections:',
    'duration:',
-   'paths-file:',
+   'scenario-file:',
    'workers:',
-   'pipeline:',
 ]);
 
-/** @var array<string, string> $opts */
-$host        = $opts['host']        ?? '127.0.0.1';
-$port        = (int) ($opts['port']        ?? 8082);
-$connections = (int) ($opts['connections'] ?? 514);
-$duration    = (int) ($opts['duration']    ?? 10);
-$pathsFile   = $opts['paths-file']  ?? '';
-$pipeline    = (int) ($opts['pipeline']    ?? 1);
-if ($pipeline < 1) $pipeline = 1;
+$host          = $opts['host']          ?? '127.0.0.1';
+$port          = (int) ($opts['port']          ?? 8084);
+$connections   = (int) ($opts['connections']   ?? 514);
+$duration      = (int) ($opts['duration']      ?? 10);
+$scenarioFile  = $opts['scenario-file'] ?? '';
 
-if ($pathsFile === '' || !\file_exists($pathsFile)) {
-   \fwrite(\STDERR, "ERROR: --paths-file is required and must exist.\n");
+if ($scenarioFile === '' || !\file_exists($scenarioFile)) {
+   \fwrite(\STDERR, "ERROR: --scenario-file is required and must exist.\n");
    exit(1);
 }
 
 
 // ---------------------------------------------------------------------------
-// Load paths and pre-build HTTP request strings
+// Load scenario
 // ---------------------------------------------------------------------------
-$json = file_get_contents($pathsFile);
+$json = file_get_contents($scenarioFile);
 if ($json === false) {
-   \fwrite(\STDERR, "ERROR: Cannot read paths file.\n");
+   \fwrite(\STDERR, "ERROR: Cannot read scenario file.\n");
    exit(1);
 }
 
 $decoded = json_decode($json, true);
 if (
    !\is_array($decoded)
-   || !isset($decoded['method'], $decoded['paths'])
-   || !\is_array($decoded['paths'])
-   || $decoded['paths'] === []
+   || !isset($decoded['message'])
+   || !\is_string($decoded['message'])
+   || $decoded['message'] === ''
 ) {
-   \fwrite(\STDERR, "ERROR: Invalid scenario data.\n");
+   \fwrite(\STDERR, "ERROR: Invalid scenario data. Need 'message'.\n");
    exit(1);
 }
 
-/** @var array{method: string, paths: array<string>} $scenario */
-$scenario = $decoded;
-
-$method    = $scenario['method'];
-$paths     = $scenario['paths'];
-$pathCount = count($paths);
-
-// @ Pre-build raw HTTP request bytes (zero allocation in hot path)
-/** @var array<string> $requests */
-$requests = [];
-foreach ($paths as $path) {
-   $requests[] = "{$method} {$path} HTTP/1.1\r\nHost: {$host}:{$port}\r\nConnection: keep-alive\r\n\r\n";
-}
+$message = $decoded['message'];
 
 
 // ---------------------------------------------------------------------------
 // Determine worker count based on FD_SETSIZE limit
 // ---------------------------------------------------------------------------
-$maxFdsPerWorker = 1000; // FD_SETSIZE=1024 minus ~24 reserved fds
+$maxFdsPerWorker = 1000;
 $requestedWorkers = isset($opts['workers'])
    ? (int) $opts['workers']
    : (int) max(1, \ceil($connections / $maxFdsPerWorker));
@@ -138,44 +125,22 @@ Logger::$display = Logger::DISPLAY_NONE;
 
 
 // ---------------------------------------------------------------------------
-// Pre-build pipeline burst strings (Phase 3: burst N requests per write)
+// Worker function: runs a single-process UDP Client benchmark
 // ---------------------------------------------------------------------------
-/** @var array<string> $pipelinedRequests */
-$pipelinedRequests = [];
-for ($i = 0; $i < $pathCount; $i++) {
-   $burst = '';
-   for ($j = 0; $j < $pipeline; $j++) {
-      $burst .= $requests[($i * $pipeline + $j) % $pathCount];
-   }
-   $pipelinedRequests[] = $burst;
-}
-$pipelinePathCount = count($pipelinedRequests);
-
-
-// ---------------------------------------------------------------------------
-// Worker function: runs a single-process TCP Client benchmark
-// ---------------------------------------------------------------------------
-/**
- * @param array<string> $requests Individual HTTP request strings.
- * @param array<string> $pipelinedRequests Pre-built initial burst strings (N requests each).
- */
 function runWorker (
    string $host, int $port, int $workerConnections, int $duration,
-   array $requests, int $pathCount,
-   array $pipelinedRequests, int $pipelinePathCount, int $pipeline,
+   string $message,
    ?string $statsFile
 ): void {
    $responsesReceived = 0;
    $bytesRead         = 0;
-   $requestIndex      = 0;
    $startTime         = 0.0;
    $latencySum        = 0.0;
    $latencyCount      = 0;
    /** @var array<int,float> $writeTimes */
    $writeTimes        = [];
 
-   $Client = new TCP_Client_CLI(TCP_Client_CLI::MODE_DEFAULT);
-   // Unlock immediately — lock is for singleton enforcement, not needed for benchmark workers
+   $Client = new UDP_Client_CLI(UDP_Client_CLI::MODE_DEFAULT);
    /** @var \Bootgly\ACI\Process $Process */
    $Process = $Client->__get('Process');
    $Process->State->lock(LOCK_UN);
@@ -187,66 +152,46 @@ function runWorker (
    );
 
    $Client->on(
-      instance: function (TCP_Client_CLI $Client)
-         use ($workerConnections, $requests, $pathCount,
-              $pipelinedRequests, $pipelinePathCount, $pipeline, $duration,
-              &$responsesReceived, &$bytesRead, &$requestIndex, &$startTime,
+      instance: function (UDP_Client_CLI $Client)
+         use ($workerConnections, $message, $duration,
+              &$responsesReceived, &$bytesRead, &$startTime,
               &$latencySum, &$latencyCount, &$writeTimes)
       {
-         TCP_Client_CLI::$onConnect = function ($Socket, $Connection)
-            use ($pipelinedRequests, $pipelinePathCount, &$requestIndex)
+         UDP_Client_CLI::$onConnect = function ($Socket, $Connection)
+            use ($message, &$writeTimes)
          {
-            // @ Fill pipeline: send initial burst of N requests
-            $Connection->output = $pipelinedRequests[$requestIndex % $pipelinePathCount];
-            $requestIndex++;
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
-         };
-
-         TCP_Client_CLI::$onWrite = function ($Socket, $Connection, $Package)
-            use (&$writeTimes)
-         {
+            // UDP writes are instant (non-blocking sendto); send immediately
+            // and register EVENT_READ to wait for the echo reply.
+            $Connection->output = $message;
+            $Connection->writing($Socket);
             $writeTimes[(int) $Socket] = microtime(true);
-            // @ Switch to read mode (remove from writes to prevent duplicate sends)
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_WRITE);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
+
+            UDP_Client_CLI::$Event->add($Socket, UDP_Client_CLI::$Event::EVENT_READ, $Connection);
          };
 
-         TCP_Client_CLI::$onRead = function ($Socket, $Connection, $Package)
-            use ($requests, $pathCount, $pipeline, &$requestIndex, &$responsesReceived, &$bytesRead,
+         UDP_Client_CLI::$onRead = function ($Socket, $Connection, $Package)
+            use ($message, &$responsesReceived, &$bytesRead,
                  &$latencySum, &$latencyCount, &$writeTimes)
          {
             $input = $Package->input;
-            $count = substr_count($input, "HTTP/1.");
-            $responsesReceived += $count;
+            $responsesReceived++;
             $bytesRead += \strlen($input);
 
             $socketId = (int) $Socket;
             if (isset($writeTimes[$socketId])) {
-               $latency = microtime(true) - $writeTimes[$socketId];
-               $latencySum += $latency * $count;
-               $latencyCount += $count;
-               unset($writeTimes[$socketId]);
+               $latencySum   += microtime(true) - $writeTimes[$socketId];
+               $latencyCount++;
             }
 
-            // @ Replenish pipeline: send exactly $count requests to replace received responses
-            if ($pipeline > 1) {
-               $burst = '';
-               for ($i = 0; $i < $count; $i++) {
-                  $burst .= $requests[$requestIndex % $pathCount];
-                  $requestIndex++;
-               }
-               $Connection->output = $burst;
-            } else {
-               $Connection->output = $requests[$requestIndex % $pathCount];
-               $requestIndex++;
-            }
-
-            // @ Switch to write mode (remove from reads to prevent being in both sets)
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            // @ Remove READ, send next datagram, re-register READ
+            UDP_Client_CLI::$Event->del($Socket, UDP_Client_CLI::$Event::EVENT_READ);
+            $Connection->output = $message;
+            $Connection->writing($Socket);
+            $writeTimes[$socketId] = microtime(true);
+            UDP_Client_CLI::$Event->add($Socket, UDP_Client_CLI::$Event::EVENT_READ, $Connection);
          };
 
-         // @ Open connections
+         // @ Open sockets
          for ($i = 0; $i < $workerConnections; $i++) {
             $socket = $Client->connect();
             if ($socket === false) break;
@@ -255,36 +200,33 @@ function runWorker (
          // @ Record start time
          $startTime = microtime(true);
 
-         // @ Set timer to stop the event loop after duration
+         // @ Stop event loop after duration
          Timer::add(
             interval: $duration,
             handler: function () {
-               TCP_Client_CLI::$Event->destroy();
+               UDP_Client_CLI::$Event->destroy();
             },
             persistent: false,
          );
 
-         // @ Enter event loop (blocks until Timer destroys it)
-         TCP_Client_CLI::$Event->loop();
+         // @ Enter event loop
+         UDP_Client_CLI::$Event->loop();
       },
    );
 
    $Client->start();
 
-   // @ Calculate results
    $elapsed = microtime(true) - $startTime;
 
    if ($statsFile !== null) {
-      // Multi-worker mode: write stats to temp file for parent aggregation
       file_put_contents($statsFile, json_encode([
-         'responses' => $responsesReceived,
-         'bytes_read' => $bytesRead,
-         'elapsed' => $elapsed,
-         'latency_sum' => $latencySum,
+         'responses'     => $responsesReceived,
+         'bytes_read'    => $bytesRead,
+         'elapsed'       => $elapsed,
+         'latency_sum'   => $latencySum,
          'latency_count' => $latencyCount,
       ]));
    } else {
-      // Single-worker mode: output directly
       outputResults($responsesReceived, $bytesRead, $elapsed, $latencySum, $latencyCount);
    }
 }
@@ -305,12 +247,9 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
       $transferStr = \number_format($transferPerSec, 0) . 'B';
    }
 
-   // @ Format latency
    $latencyStr = null;
    if ($avgLatency !== null) {
-      if ($avgLatency >= 1.0) {
-         $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
-      } elseif ($avgLatency >= 0.001) {
+      if ($avgLatency >= 0.001) {
          $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
       } else {
          $latencyStr = \number_format($avgLatency * 1_000_000, 2) . 'us';
@@ -318,7 +257,7 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
    }
 
    echo json_encode([
-      'rps'      => (string) \round($rps, 2) . ' req/s',
+      'rps'      => (string) \round($rps, 2),
       'latency'  => $latencyStr,
       'transfer' => "{$transferStr}/s",
    ]);
@@ -329,27 +268,23 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
 // Execute: single-worker or multi-worker
 // ---------------------------------------------------------------------------
 if ($requestedWorkers <= 1) {
-   // @ Single-worker: no fork, run directly
    runWorker($host, $port, $connectionsPerWorker, $duration,
-             $requests, $pathCount,
-             $pipelinedRequests, $pipelinePathCount, $pipeline, null);
+             $message, null);
    exit(0);
 }
 
 // @ Multi-worker: fork N children
 $tmpDir    = sys_get_temp_dir();
-$statsBase = "{$tmpDir}/bootgly_bench_" . \getmypid() . '_';
+$statsBase = "{$tmpDir}/bootgly_udp_bench_" . \getmypid() . '_';
 $childPids = [];
 
 for ($w = 0; $w < $requestedWorkers; $w++) {
    $pid = \pcntl_fork();
 
    if ($pid === 0) {
-      // Child process
       $statsFile = "{$statsBase}" . \getmypid() . '.json';
       runWorker($host, $port, $connectionsPerWorker, $duration,
-                $requests, $pathCount,
-                $pipelinedRequests, $pipelinePathCount, $pipeline, $statsFile);
+                $message, $statsFile);
       exit(0);
    } elseif ($pid > 0) {
       $childPids[] = $pid;
@@ -364,9 +299,9 @@ foreach ($childPids as $pid) {
 }
 
 // @ Aggregate stats from temp files
-$totalResponses  = 0;
-$totalBytesRead  = 0;
-$maxElapsed      = 0.0;
+$totalResponses    = 0;
+$totalBytesRead    = 0;
+$maxElapsed        = 0.0;
 $totalLatencySum   = 0.0;
 $totalLatencyCount = 0;
 
@@ -375,12 +310,11 @@ foreach ($statsFiles as $file) {
    $data = json_decode((string) file_get_contents($file), true);
    if (!\is_array($data)) continue;
 
-   /** @var array{responses?: int, bytes_read?: int, elapsed?: float, latency_sum?: float, latency_count?: int} $data */
-   $totalResponses    += $data['responses'] ?? 0;
-   $totalBytesRead    += $data['bytes_read'] ?? 0;
-   $maxElapsed         = max($maxElapsed, (float) ($data['elapsed'] ?? 0.0));
-   $totalLatencySum   += (float) ($data['latency_sum'] ?? 0.0);
-   $totalLatencyCount += (int) ($data['latency_count'] ?? 0);
+   $totalResponses    += $data['responses']      ?? 0;
+   $totalBytesRead    += $data['bytes_read']      ?? 0;
+   $maxElapsed         = max($maxElapsed, (float) ($data['elapsed']        ?? 0.0));
+   $totalLatencySum   += (float) ($data['latency_sum']   ?? 0.0);
+   $totalLatencyCount += (int)   ($data['latency_count'] ?? 0);
 
    @\unlink($file);
 }

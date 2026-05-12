@@ -156,19 +156,19 @@ function runWorker (
    );
 
    $Client->on(
-      instance: function (TCP_Client_CLI $Client)
+      workerStarted: function (TCP_Client_CLI $Client)
          use ($workerConnections, $message, $delimiter, $duration,
               &$responsesReceived, &$bytesRead, &$startTime,
               &$latencySum, &$latencyCount, &$writeTimes)
       {
-         TCP_Client_CLI::$onConnect = function ($Socket, $Connection)
+         TCP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
             use ($message)
          {
             $Connection->output = $message;
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
          };
 
-         TCP_Client_CLI::$onWrite = function ($Socket, $Connection, $Package)
+         TCP_Client_CLI::$onDataWrite = function ($Socket, $Connection, $Package)
             use (&$writeTimes)
          {
             $writeTimes[(int) $Socket] = microtime(true);
@@ -176,7 +176,7 @@ function runWorker (
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
          };
 
-         TCP_Client_CLI::$onRead = function ($Socket, $Connection, $Package)
+         TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
             use ($message, $delimiter, &$responsesReceived, &$bytesRead,
                  &$latencySum, &$latencyCount, &$writeTimes)
          {

@@ -152,12 +152,12 @@ function runWorker (
    );
 
    $Client->on(
-      instance: function (UDP_Client_CLI $Client)
+      workerStarted: function (UDP_Client_CLI $Client)
          use ($workerConnections, $message, $duration,
               &$responsesReceived, &$bytesRead, &$startTime,
               &$latencySum, &$latencyCount, &$writeTimes)
       {
-         UDP_Client_CLI::$onConnect = function ($Socket, $Connection)
+         UDP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
             use ($message, &$writeTimes)
          {
             // UDP writes are instant (non-blocking sendto); send immediately
@@ -169,7 +169,7 @@ function runWorker (
             UDP_Client_CLI::$Event->add($Socket, UDP_Client_CLI::$Event::EVENT_READ, $Connection);
          };
 
-         UDP_Client_CLI::$onRead = function ($Socket, $Connection, $Package)
+         UDP_Client_CLI::$onDatagramRead = function ($Socket, $Connection, $Package)
             use ($message, &$responsesReceived, &$bytesRead,
                  &$latencySum, &$latencyCount, &$writeTimes)
          {

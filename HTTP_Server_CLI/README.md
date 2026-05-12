@@ -15,6 +15,8 @@ Unlike simple "Hello, World!" benchmarks, this suite tests **real routing patter
 - [Prerequisites](#-prerequisites)
 - [Installation](#-installation)
 - [Running Benchmarks](#-running-benchmarks)
+- [Async Database Probe](#-async-database-probe)
+- [Database Runner Benchmark](#-database-runner-benchmark)
 - [Multi-dimensional Vary](#-multi-dimensional-vary---vary)
 - [Contextual Help](#-contextual-help)
 - [Understanding Results](#-understanding-results)
@@ -181,6 +183,8 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 | **curl** | Server readiness check | ✅ |
 | **nproc** | CPU count detection | ✅ |
 | **wrk** | HTTP benchmarking tool | Only for `--runner=wrk` |
+| **psql** | Async Database probe control query | Only for async DB probe |
+| **PostgreSQL** | Async Database probe target | Only for async DB probe |
 | **Swoole extension** | Swoole / Hyperf benchmarks | Optional |
 | **FrankenPHP binary** | FrankenPHP benchmarks | Optional |
 
@@ -348,6 +352,102 @@ cd /path/to/bootgly
 | `roadrunner` | RoadRunner (Go + PHP) |
 | `frankenphp` | FrankenPHP worker mode |
 | `hyperf` | Hyperf (Swoole framework) |
+
+---
+
+## 🧪 Async Database Probe
+
+The optional ADI Database probe verifies that a PostgreSQL operation suspended through Bootgly's native event loop does **not** block a single `HTTP_Server_CLI` worker.
+
+It starts a one-worker Bootgly server, generates load against `/load` with Bootgly's own `TCP_Client_CLI` benchmark worker, opens `/db-sleep` (`SELECT pg_sleep(...)`), confirms the query is active through `pg_stat_activity`, and then requests `/fast`. The probe passes only when `/fast` responds quickly while PostgreSQL is still sleeping.
+
+This probe does **not** require `wrk`.
+
+### Requirements
+
+- `psql` in `PATH`
+- a reachable PostgreSQL database
+- sibling repository layout: `bootgly/` and `bootgly_benchmarks/`
+- the Demo HTTP Server CLI database config enabled through environment variables
+
+### Example
+
+Run from the `bootgly` repository:
+
+```bash
+DB_ENABLED=true \
+DB_HOST=127.0.0.1 \
+DB_PORT=55432 \
+DB_NAME=bootgly \
+DB_USER=postgres \
+DB_PASS= \
+DB_SSLMODE=disable \
+DB_SSLVERIFY=false \
+php ../bootgly_benchmarks/HTTP_Server_CLI/probes/async_database.php
+```
+
+Expected success includes:
+
+```text
+PostgreSQL active pg_sleep seen: yes (active=1)
+Fast response during active DB: HTTP 200 in 0.000392s
+Load output: {"rps":"231.36 req\/s","latency":"250.34ms","transfer":"30.73KB\/s"}
+PASS: database wait did not block the single HTTP worker.
+```
+
+### Probe variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BOOTGLY_ADI_PROBE_PORT` | `18082` | Probe HTTP server port |
+| `BOOTGLY_ADI_PROBE_CONNECTIONS` | `64` | TCP client connection count |
+| `BOOTGLY_ADI_PROBE_CLIENT_WORKERS` | `2` | TCP client worker processes |
+| `BOOTGLY_ADI_PROBE_DURATION` | `12` | TCP client duration in seconds |
+| `BOOTGLY_ADI_PROBE_PIPELINE` | `1` | HTTP pipelining factor |
+| `BOOTGLY_ADI_PROBE_DB_SLEEP` | `2` | PostgreSQL `pg_sleep()` duration |
+| `BOOTGLY_ADI_PROBE_FAST_MAX` | `0.5` | Maximum accepted `/fast` latency in seconds |
+| `BOOTGLY_ADI_PROBE_LOAD_DELAY` | `0.25` | Deferred `/load` response delay in seconds |
+
+---
+
+## 🧪 Database Runner Benchmark
+
+The database benchmark compares the low-level ADI Database code path against the `HTTP_Server_CLI` Runner helper. It is Bootgly-only and uses the TCP_Client runner scenarios from `scenarios/database/php`.
+
+Run from the `bootgly` repository:
+
+```bash
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=database \
+BOOTGLY_HTTP_SERVER_CLI_SCENARIOS=database \
+DB_HOST=127.0.0.1 \
+DB_PORT=5432 \
+DB_NAME=bootgly \
+DB_USER=postgres \
+DB_PASS= \
+DB_SSLMODE=disable \
+DB_SSLVERIFY=false \
+DB_POOL_MAX=1 \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=32 --client-workers=6 --scenarios=1,2,3,4,5,6
+```
+
+Local tuning notes from WSL2/Ryzen 9 3900X/PostgreSQL `max_connections=100`:
+
+- `DB_POOL_MAX=1` per HTTP worker was fastest for short `SELECT 1` and parameterized queries.
+- `--server-workers=28..32`, `--client-workers=6`, and `--connections=1024` produced the best throughput range.
+- The best 10s quick-suite run reached about `130k req/s` native ping and `128k req/s` Runner ping, with Runner overhead within benchmark noise.
+- `--connections=512` is a lower-latency alternative with similar throughput on this machine.
+- The `pg_sleep` scenarios are async-behavior checks; avoid high-concurrency throughput comparisons for them unless the runner also validates successful HTTP status codes.
+
+Scenario pairs:
+
+| Native route | Runner route | Purpose |
+|--------------|--------------|---------|
+| `/database/native/ping` | `/database/runner/ping` | `SELECT 1` helper overhead |
+| `/database/native/parameters` | `/database/runner/parameters` | parameterized query overhead |
+| `/database/native/pool` | `/database/runner/pool` | pool/concurrent operations overhead |
+| `/database/native/sleep` | `/database/runner/sleep` | slow async query overhead |
+
+The sync PostgreSQL baseline is intentionally left for a later benchmark using a real blocking PostgreSQL client (`PDO`/`pgsql`) outside the framework core.
 
 ---
 

@@ -160,7 +160,7 @@ function runWorker (
 
    // @ Register HTTP hooks
    $Client->on(
-      instance: function (HTTP_Client_CLI $Client)
+      workerStarted: function (HTTP_Client_CLI $Client)
          use ($method, $paths, $pathCount, $workerConnections, $duration, &$requestIndex, &$startTime)
       {
          // @ Prepare initial request
@@ -187,7 +187,7 @@ function runWorker (
          // @ Enter event loop (blocks until Timer destroys it)
          HTTP_Client_CLI::$Event->loop();
       },
-      write: function ($Socket)
+      dataWrite: function ($Socket)
          use (&$writeTimes, &$latencySum, &$latencyCount)
       {
          $socketId = (int) $Socket;
@@ -201,7 +201,7 @@ function runWorker (
 
          $writeTimes[$socketId] = $now;
       },
-      response: function ()
+      responseReceive: function ()
          use ($Client, $method, $paths, $pathCount, &$requestIndex, &$responsesReceived)
       {
          $responsesReceived++;

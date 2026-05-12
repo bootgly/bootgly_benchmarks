@@ -18,6 +18,7 @@ $runnerFile = match ($runnerType) {
    default       => ucfirst($runnerType),
 };
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
+$scenarioSet = strtolower(getenv('BOOTGLY_HTTP_SERVER_CLI_SCENARIOS') ?: 'router');
 
 // @ Configure per runner type
 if ($runnerType === 'tcp_client' || $runnerType === 'http_client') {
@@ -26,7 +27,7 @@ if ($runnerType === 'tcp_client' || $runnerType === 'http_client') {
    $Runner->duration = 10;
 
    // @ Load PHP scenarios
-   $Runner->load(__DIR__ . '/scenarios/php');
+   $Runner->load(__DIR__ . ($scenarioSet === 'database' ? '/scenarios/database/php' : '/scenarios/php'));
 } else if ($runnerType === 'wrk') {
    $Runner->port = 8082;
    $Runner->threads = 10;

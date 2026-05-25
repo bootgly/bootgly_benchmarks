@@ -32,6 +32,7 @@ return new class (
    public int $duration;
    public int $workers = 0;
    public int $pipeline = 1;
+   public int $preflightTimeout = 3;
    // # warmup
    public int $warmupDuration = 2;
    public int $warmupConnections = 64;
@@ -439,6 +440,20 @@ return new class (
       // @ Load scenario data from PHP file
       $scenarioData = include $Scenario->file;
 
+      if (is_array($scenarioData) === false) {
+         echo "      Preflight failed: invalid scenario data.\n";
+
+         return new Result();
+      }
+
+      $preflight = $this->preflight($scenarioData);
+
+      if ($preflight !== '') {
+         echo "      Preflight failed: {$preflight}\n";
+
+         return new Result();
+      }
+
       // @ Write scenario paths to temp file
       $tmpFile = tempnam(sys_get_temp_dir(), 'bench_scenario_');
       if ($tmpFile === false) {
@@ -467,6 +482,168 @@ return new class (
       $json = implode('', $output);
 
       return $this->parse($json);
+   }
+
+   /**
+    * Verify one scenario returns the expected HTTP response before timing load.
+    *
+    * @param array<string,mixed> $scenario
+    */
+   private function preflight (array $scenario): string
+   {
+      $method = $scenario['method'] ?? 'GET';
+      $paths = $scenario['paths'] ?? [];
+      $expect = $scenario['expect'] ?? [];
+      $strict = isset($scenario['expect']);
+
+      if (is_string($method) === false || $method === '') {
+         return 'scenario method must be a non-empty string';
+      }
+
+      if (is_array($paths) === false || $paths === []) {
+         return 'scenario paths must be a non-empty array';
+      }
+
+      if (is_array($expect) === false) {
+         $expect = [];
+      }
+
+      $expectedStatus = isset($expect['status']) ? (int) $expect['status'] : null;
+      $contains = $expect['contains'] ?? [];
+
+      if (is_string($contains)) {
+         $contains = [$contains];
+      }
+
+      if (is_array($contains) === false) {
+         $contains = [];
+      }
+
+      foreach ($paths as $path) {
+         if (is_string($path) === false || $path === '') {
+            return 'scenario path must be a non-empty string';
+         }
+
+         $response = $this->request($method, $path);
+
+         if ($response['error'] !== '') {
+            return "{$path}: {$response['error']}";
+         }
+
+         $status = $response['status'];
+
+         if ($expectedStatus !== null && $status !== $expectedStatus) {
+            return "{$path}: expected HTTP {$expectedStatus}, got HTTP {$status}";
+         }
+
+         if ($strict && $expectedStatus === null && ($status < 200 || $status >= 300)) {
+            return "{$path}: expected HTTP 2xx, got HTTP {$status}";
+         }
+
+         foreach ($contains as $needle) {
+            if (is_string($needle) === false || $needle === '') {
+               continue;
+            }
+
+            if (str_contains($response['body'], $needle) === false) {
+               return "{$path}: response body missing {$needle}";
+            }
+         }
+      }
+
+      return '';
+   }
+
+   /**
+    * Send one short HTTP request for scenario preflight.
+    *
+    * @return array{status:int,body:string,error:string}
+    */
+   private function request (string $method, string $path): array
+   {
+      $socket = @stream_socket_client("tcp://127.0.0.1:{$this->port}", $errno, $error, $this->preflightTimeout);
+
+      if (is_resource($socket) === false) {
+         return [
+            'status' => 0,
+            'body' => '',
+            'error' => $error !== '' ? $error : 'could not connect to server',
+         ];
+      }
+
+      stream_set_timeout($socket, $this->preflightTimeout);
+      fwrite($socket, "{$method} {$path} HTTP/1.1\r\nHost: 127.0.0.1:{$this->port}\r\nConnection: close\r\n\r\n");
+      $raw = '';
+
+      while (feof($socket) === false) {
+         $chunk = fread($socket, 8192);
+
+         if ($chunk === false) {
+            fclose($socket);
+
+            return [
+               'status' => 0,
+               'body' => '',
+               'error' => 'could not read response',
+            ];
+         }
+
+         if ($chunk === '') {
+            $meta = stream_get_meta_data($socket);
+
+            if (($meta['timed_out'] ?? false) === true) {
+               fclose($socket);
+
+               return [
+                  'status' => 0,
+                  'body' => '',
+                  'error' => 'response timed out',
+               ];
+            }
+
+            continue;
+         }
+
+         $raw .= $chunk;
+
+         if ($this->complete($raw)) {
+            break;
+         }
+      }
+
+      fclose($socket);
+      $parts = explode("\r\n\r\n", $raw, 2);
+      $head = $parts[0] ?? '';
+      $body = $parts[1] ?? '';
+      $status = 0;
+
+      if (preg_match('/^HTTP\/\S+\s+(\d{3})/m', $head, $matches) === 1) {
+         $status = (int) $matches[1];
+      }
+
+      return [
+         'status' => $status,
+         'body' => $body,
+         'error' => $status > 0 ? '' : 'invalid HTTP response',
+      ];
+   }
+
+   /**
+    * Check whether one raw HTTP response has the full declared body.
+    */
+   private function complete (string $raw): bool
+   {
+      $parts = explode("\r\n\r\n", $raw, 2);
+
+      if (isset($parts[1]) === false) {
+         return false;
+      }
+
+      if (preg_match('/\r\nContent-Length:\s*(\d+)\r\n/i', "\r\n" . $parts[0] . "\r\n", $matches) !== 1) {
+         return false;
+      }
+
+      return strlen($parts[1]) >= (int) $matches[1];
    }
    private function parse (string $output): Result
    {

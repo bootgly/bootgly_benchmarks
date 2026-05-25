@@ -47,6 +47,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Logger;
 use Bootgly\WPI\Nodes\HTTP_Client_CLI;
+use Bootgly\WPI\Nodes\HTTP_Client_CLI\Events;
 
 
 // ---------------------------------------------------------------------------
@@ -159,8 +160,8 @@ function runWorker (
    );
 
    // @ Register HTTP hooks
-   $Client->on(
-      workerStarted: function (HTTP_Client_CLI $Client)
+   $Client
+      ->on(Events::WorkerStarted, function (HTTP_Client_CLI $Client)
          use ($method, $paths, $pathCount, $workerConnections, $duration, &$requestIndex, &$startTime)
       {
          // @ Prepare initial request
@@ -186,8 +187,8 @@ function runWorker (
 
          // @ Enter event loop (blocks until Timer destroys it)
          HTTP_Client_CLI::$Event->loop();
-      },
-      dataWrite: function ($Socket)
+      })
+      ->on(Events::DataWrite, function ($Socket)
          use (&$writeTimes, &$latencySum, &$latencyCount)
       {
          $socketId = (int) $Socket;
@@ -200,16 +201,15 @@ function runWorker (
          }
 
          $writeTimes[$socketId] = $now;
-      },
-      responseReceive: function ()
+      })
+      ->on(Events::ResponseReceive, function ()
          use ($Client, $method, $paths, $pathCount, &$requestIndex, &$responsesReceived)
       {
          $responsesReceived++;
 
          // @ Queue next request (auto-sent by HTTP_Client_CLI)
          $Client->request($method, $paths[$requestIndex++ % $pathCount]);
-      }
-   );
+      });
 
    $Client->start();
 

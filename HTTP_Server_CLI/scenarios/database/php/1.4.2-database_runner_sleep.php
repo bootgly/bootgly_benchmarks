@@ -1,10 +1,14 @@
 <?php
-// @label: Database runner sleep
-// @group: Database async slow query
+// @label: Database resource sleep
+// @group: Database async probe
 // @competitors: Bootgly
-// Runner helper ADI PostgreSQL slow query with event-loop wait.
+// Response resource ADI PostgreSQL slow query with event-loop wait.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/runner/sleep'],
+   'paths' => ['/database/resource/sleep'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"value":42'],
+   ],
 ];

@@ -1,10 +1,14 @@
 <?php
-// @label: Database native sleep
-// @group: Database async slow query
-// @competitors: Bootgly
+// @label: Database micro sleep
+// @group: Database async probe
+// @competitors: Bootgly,Swoole Database
 // Low-level ADI PostgreSQL slow query with event-loop wait.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/native/sleep'],
+   'paths' => ['/database/native/sleep'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"value":42'],
+   ],
 ];

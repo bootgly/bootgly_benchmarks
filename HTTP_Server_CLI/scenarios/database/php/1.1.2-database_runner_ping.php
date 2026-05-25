@@ -1,10 +1,14 @@
 <?php
-// @label: Database runner ping
-// @group: Database runner helper
+// @label: Database resource query
+// @group: Database Bootgly resources
 // @competitors: Bootgly
-// ADI PostgreSQL ping through HTTP_Server_CLI Runner helper.
+// ADI PostgreSQL ping through HTTP_Server_CLI Response\Resources\Database.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/runner/ping'],
+   'paths' => ['/database/resource/ping'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"ok":1'],
+   ],
 ];

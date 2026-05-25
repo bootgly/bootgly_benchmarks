@@ -1,10 +1,14 @@
 <?php
-// @label: Database runner pool
-// @group: Database runner helper
+// @label: Database resource multi-query
+// @group: Database Bootgly resources
 // @competitors: Bootgly
-// Runner helper ADI PostgreSQL pool/concurrent operations.
+// Response resource ADI PostgreSQL pool/concurrent operations.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/runner/pool'],
+   'paths' => ['/database/resource/pool'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"errors":[]', '"value":1', '"value":2', '"value":3'],
+   ],
 ];

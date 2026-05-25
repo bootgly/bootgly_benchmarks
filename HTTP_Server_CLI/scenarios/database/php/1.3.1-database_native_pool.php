@@ -1,10 +1,14 @@
 <?php
-// @label: Database native pool
-// @group: Database native low-level
-// @competitors: Bootgly
-// Low-level ADI PostgreSQL pool/concurrent operations.
+// @label: Database micro multi-query
+// @group: Database microbenchmarks
+// @competitors: Bootgly,Swoole Database
+// Three independent SELECT operations in one request.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/native/pool'],
+   'paths' => ['/database/native/pool'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"errors":[]', '"value":1', '"value":2', '"value":3'],
+   ],
 ];

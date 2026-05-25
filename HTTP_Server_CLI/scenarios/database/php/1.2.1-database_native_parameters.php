@@ -1,10 +1,14 @@
 <?php
-// @label: Database native parameters
-// @group: Database native low-level
-// @competitors: Bootgly
+// @label: Database micro parameterized
+// @group: Database microbenchmarks
+// @competitors: Bootgly,Swoole Database
 // Low-level ADI PostgreSQL parameterized query.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/native/parameters'],
+   'paths' => ['/database/native/parameters'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"value":42', '"label":"bootgly"'],
+   ],
 ];

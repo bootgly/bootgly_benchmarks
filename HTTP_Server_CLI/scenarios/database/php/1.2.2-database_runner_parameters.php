@@ -1,10 +1,14 @@
 <?php
-// @label: Database runner parameters
-// @group: Database runner helper
+// @label: Database resource parameterized
+// @group: Database Bootgly resources
 // @competitors: Bootgly
-// Runner helper ADI PostgreSQL parameterized query.
+// Response resource ADI PostgreSQL parameterized query.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/runner/parameters'],
+   'paths' => ['/database/resource/parameters'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"value":42', '"label":"bootgly"'],
+   ],
 ];

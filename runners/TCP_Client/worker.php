@@ -27,7 +27,7 @@ if (!\defined('BOOTGLY_WORKING_BASE')) {
    \define('BOOTGLY_WORKING_DIR', BOOTGLY_ROOT_DIR);
 }
 if (!\defined('BOOTGLY_VERSION')) {
-   \define('BOOTGLY_VERSION', '0.12.1-beta');
+   \define('BOOTGLY_VERSION', '0.16.0-beta');
 }
 
 @include($rootDir . 'vendor/autoload.php');
@@ -47,6 +47,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Logger;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI;
+use Bootgly\WPI\Interfaces\TCP_Client_CLI\Events;
 
 
 // ---------------------------------------------------------------------------
@@ -187,7 +188,8 @@ function runWorker (
    );
 
    $Client->on(
-      workerStarted: function (TCP_Client_CLI $Client)
+      Events::WorkerStarted,
+      function (TCP_Client_CLI $Client)
          use ($workerConnections, $requests, $pathCount,
               $pipelinedRequests, $pipelinePathCount, $pipeline, $duration,
               &$responsesReceived, &$bytesRead, &$requestIndex, &$startTime,
@@ -266,7 +268,7 @@ function runWorker (
 
          // @ Enter event loop (blocks until Timer destroys it)
          TCP_Client_CLI::$Event->loop();
-      },
+      }
    );
 
    $Client->start();

@@ -20,6 +20,31 @@ $runnerFile = match ($runnerType) {
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 $scenarioSet = strtolower(getenv('BOOTGLY_HTTP_SERVER_CLI_SCENARIOS') ?: 'router');
 
+if ($scenarioSet === 'database') {
+   $psql = trim(exec('command -v psql 2>/dev/null') ?: '');
+   $seedFile = __DIR__ . '/artifacts/@postgresql/techempower.sql';
+
+   if ($psql !== '' && is_file($seedFile)) {
+      $password = getenv('DB_PASS');
+      $command = 'PGPASSWORD=' . escapeshellarg($password === false ? '' : $password) . ' '
+         . escapeshellarg($psql)
+         . ' -h ' . escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1')
+         . ' -p ' . escapeshellarg(getenv('DB_PORT') ?: '5432')
+         . ' -U ' . escapeshellarg(getenv('DB_USER') ?: 'postgres')
+         . ' -d ' . escapeshellarg(getenv('DB_NAME') ?: 'bootgly')
+         . ' -v ON_ERROR_STOP=1'
+         . ' -f ' . escapeshellarg($seedFile)
+         . ' >/dev/null 2>&1';
+      $seedOutput = [];
+      $seeded = 0;
+      exec($command, $seedOutput, $seeded);
+
+      if ($seeded !== 0) {
+         fwrite(STDERR, "Warning: could not seed TechEmpower database tables. Benchmark preflight may fail.\n");
+      }
+   }
+}
+
 // @ Configure per runner type
 if ($runnerType === 'tcp_client' || $runnerType === 'http_client') {
    $Runner->port = 8082;
@@ -98,6 +123,15 @@ $Runner->add(new Competitor(
       return 'v' . $v;
    },
    script: __DIR__ . '/competitors/swoole-coroutine.php',
+));
+$Runner->add(new Competitor(
+   name: 'Swoole Database',
+   version: function () {
+      $swoole = exec("php -r \"echo phpversion('swoole') ?? 'unknown';\" 2>/dev/null") ?: 'unknown';
+      $pdoPgsql = exec("php -r \"echo extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'missing-pdo_pgsql';\" 2>/dev/null") ?: 'missing-pdo_pgsql';
+      return 'v' . $swoole . ' ' . $pdoPgsql;
+   },
+   script: __DIR__ . '/competitors/swoole-database.php',
 ));
 $Runner->add(new Competitor(
    name: 'Workerman',

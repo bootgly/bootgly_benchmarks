@@ -16,7 +16,7 @@ Unlike simple "Hello, World!" benchmarks, this suite tests **real routing patter
 - [Installation](#-installation)
 - [Running Benchmarks](#-running-benchmarks)
 - [Async Database Probe](#-async-database-probe)
-- [Database Runner Benchmark](#-database-runner-benchmark)
+- [Database Resource Benchmark](#-database-resource-benchmark)
 - [Multi-dimensional Vary](#-multi-dimensional-vary---vary)
 - [Contextual Help](#-contextual-help)
 - [Understanding Results](#-understanding-results)
@@ -410,9 +410,13 @@ PASS: database wait did not block the single HTTP worker.
 
 ---
 
-## 🧪 Database Runner Benchmark
+## 🧪 TechEmpower-Style Database Benchmark
 
-The database benchmark compares the low-level ADI Database code path against the `HTTP_Server_CLI` Runner helper. It is Bootgly-only and uses the TCP_Client runner scenarios from `scenarios/database/php`.
+The competitive database benchmark now follows the TechEmpower database surface: `/db`, `/query?queries=N`, `/fortunes`, and `/updates?queries=N`. These scenarios are neutral across competitors and run against Bootgly and the standalone `Swoole Database` competitor.
+
+The older `SELECT 1`, parameterized query, multi-query, and `pg_sleep` routes remain available as Bootgly microbenchmarks. They are useful for isolating DBAL/resource overhead, but they are not the primary cross-framework comparison.
+
+Preliminary local results are recorded in [`RESULTS.md`](RESULTS.md).
 
 Run from the `bootgly` repository:
 
@@ -427,27 +431,58 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=32 --client-workers=6 --scenarios=1,2,3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --scenarios=1,2,3,4
 ```
+
+Compare Bootgly with Swoole's standalone PostgreSQL competitor:
+
+```bash
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=database \
+BOOTGLY_HTTP_SERVER_CLI_SCENARIOS=database \
+DB_HOST=127.0.0.1 \
+DB_PORT=5432 \
+DB_NAME=bootgly \
+DB_USER=postgres \
+DB_PASS= \
+DB_SSLMODE=disable \
+DB_SSLVERIFY=false \
+DB_POOL_MAX=3 \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-database --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --scenarios=1,2,3,4
+```
+
+The Swoole Database competitor requires PHP extensions `swoole` and `pdo_pgsql` (`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 
 Local tuning notes from WSL2/Ryzen 9 3900X/PostgreSQL `max_connections=100`:
 
-- `DB_POOL_MAX=1` per HTTP worker was fastest for short `SELECT 1` and parameterized queries.
-- `--server-workers=28..32`, `--client-workers=6`, and `--connections=1024` produced the best throughput range.
-- The best 10s quick-suite run reached about `130k req/s` native ping and `128k req/s` Runner ping, with Runner overhead within benchmark noise.
+- `DB_POOL_MAX=1` per HTTP worker was fastest for short microbenchmarks.
+- On a single machine running client, server, and PostgreSQL together, `--server-workers=24` and `--client-workers=4` is the best balanced full-suite default observed so far.
+- `--server-workers=28` and `--client-workers=5` favored peak ping/parameter throughput, while 24/4 left more CPU headroom for pool-heavy scenarios.
+- For Swoole comparison, `DB_POOL_MAX=1` is the strict single-connection-per-worker control. `DB_POOL_MAX=3` is the recommended comparison setting; `DB_POOL_MAX=4` uses 96 database connections at 24 workers and leaves little PostgreSQL headroom while producing similar results.
+- Older `126k..130k req/s` artifacts did not validate HTTP status/body; the current TCP_Client preflight rejects 404/500 before timed runs.
 - `--connections=512` is a lower-latency alternative with similar throughput on this machine.
-- The `pg_sleep` scenarios are async-behavior checks; avoid high-concurrency throughput comparisons for them unless the runner also validates successful HTTP status codes.
+- The `pg_sleep` scenarios are async-behavior checks, not TechEmpower scenarios.
 
-Scenario pairs:
+TechEmpower-style scenarios:
 
-| Native route | Runner route | Purpose |
+| Route | Purpose |
+|-------|---------|
+| `/db` | Fetch one random `World` row |
+| `/query?queries=20` | Fetch 20 random `World` rows |
+| `/fortunes` | Fetch, append, sort, escape, and render `Fortune` rows |
+| `/updates?queries=20` | Fetch and update 20 random `World` rows |
+
+Bootgly microbenchmark pairs:
+
+| Micro route | Resource route | Purpose |
 |--------------|--------------|---------|
-| `/database/native/ping` | `/database/runner/ping` | `SELECT 1` helper overhead |
-| `/database/native/parameters` | `/database/runner/parameters` | parameterized query overhead |
-| `/database/native/pool` | `/database/runner/pool` | pool/concurrent operations overhead |
-| `/database/native/sleep` | `/database/runner/sleep` | slow async query overhead |
+| `/database/native/ping` | `/database/resource/ping` | `SELECT 1` helper overhead |
+| `/database/native/parameters` | `/database/resource/parameters` | parameterized query overhead |
+| `/database/native/pool` | `/database/resource/pool` | pool/concurrent operations overhead |
+| `/database/native/sleep` | `/database/resource/sleep` | slow async query overhead |
 
-The sync PostgreSQL baseline is intentionally left for a later benchmark using a real blocking PostgreSQL client (`PDO`/`pgsql`) outside the framework core.
+The legacy `/database/runner/*` routes remain available as aliases for older commands, but new scenarios target `/database/resource/*`.
+
+For cross-framework comparison, use scenarios `1,2,3,4`. `Response\Resources\Database` scenarios remain Bootgly-specific.
 
 ---
 

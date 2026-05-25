@@ -50,6 +50,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Logger;
 use Bootgly\WPI\Interfaces\UDP_Client_CLI;
+use Bootgly\WPI\Interfaces\UDP_Client_CLI\Events;
 
 
 // ---------------------------------------------------------------------------
@@ -152,7 +153,8 @@ function runWorker (
    );
 
    $Client->on(
-      workerStarted: function (UDP_Client_CLI $Client)
+      Events::WorkerStarted,
+      function (UDP_Client_CLI $Client)
          use ($workerConnections, $message, $duration,
               &$responsesReceived, &$bytesRead, &$startTime,
               &$latencySum, &$latencyCount, &$writeTimes)
@@ -211,7 +213,7 @@ function runWorker (
 
          // @ Enter event loop
          UDP_Client_CLI::$Event->loop();
-      },
+      }
    );
 
    $Client->start();

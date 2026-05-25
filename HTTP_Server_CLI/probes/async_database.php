@@ -29,6 +29,7 @@ use function file_put_contents;
 use function fread;
 use function fwrite;
 use function getenv;
+use function is_numeric;
 use function is_file;
 use function is_resource;
 use function json_encode;
@@ -48,19 +49,20 @@ use function str_replace;
 use function stream_select;
 use function stream_set_blocking;
 use function stream_socket_client;
+use function strtolower;
 use function sys_get_temp_dir;
 use function trim;
 use function unlink;
 use function usleep;
 
-use Bootgly\ADI\Database;
+use Bootgly\ADI\Databases\SQL;
+use Bootgly\ADI\Databases\SQL\Config as SQLConfig;
 use Bootgly\API\Endpoints\Server\Modes;
-use Bootgly\API\Environment\Configs;
-use Bootgly\API\Environment\Configs\Config;
-use Bootgly\API\Environment\Configs\DatabaseConfig;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI;
+use Bootgly\WPI\Nodes\HTTP_Server_CLI\Events;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Request;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response;
+use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response\Resources\Database as DatabaseResource;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Router;
 use RuntimeException;
 use Throwable;
@@ -114,7 +116,7 @@ function probe_bootstrap (string $Root): void
    }
 
    if (defined('BOOTGLY_VERSION') === false) {
-      define('BOOTGLY_VERSION', '0.15.0-beta');
+      define('BOOTGLY_VERSION', '0.16.0-beta');
    }
 
    @include $Root . '/vendor/autoload.php';
@@ -133,6 +135,21 @@ function probe_bootstrap (string $Root): void
 
       include $file;
    });
+
+   if (defined('Bootgly\\CLI') === false) {
+      if (defined('GET') === false) {
+         require $Root . '/Bootgly/WPI/autoload.php';
+      }
+
+      $CLI = new \stdClass;
+      $CLI->Commands = new \Bootgly\CLI\Commands;
+      $CLI->Terminal = new \Bootgly\CLI\Terminal;
+      $WPI = new \Bootgly\WPI;
+      define('Bootgly\\CLI', $CLI);
+      define('Bootgly\\WPI', $WPI);
+
+      return;
+   }
 
    if (defined('GET') === false) {
       require $Root . '/Bootgly/WPI/autoload.php';
@@ -596,13 +613,20 @@ function probe_defaults (): void
 {
    $defaults = [
       'DB_ENABLED' => 'true',
+      'DB_CONNECTION' => 'pgsql',
       'DB_HOST' => '127.0.0.1',
       'DB_PORT' => '5432',
       'DB_NAME' => 'bootgly',
       'DB_USER' => 'postgres',
       'DB_PASS' => '',
+      'DB_POOL_MIN' => '0',
+      'DB_POOL_MAX' => '8',
+      'DB_STATEMENTS' => '256',
+      'DB_TIMEOUT' => '30',
       'DB_SSLMODE' => 'disable',
       'DB_SSLVERIFY' => 'false',
+      'DB_SSLPEER' => '',
+      'DB_SSLCAFILE' => '',
    ];
 
    foreach ($defaults as $key => $value) {
@@ -610,6 +634,49 @@ function probe_defaults (): void
          putenv("{$key}={$value}");
       }
    }
+}
+
+/**
+ * Build the ADI SQL config used by the probe server.
+ */
+function probe_sql_config (): SQLConfig
+{
+   $port = probe_env('DB_PORT', (string) SQLConfig::DEFAULT_PORT);
+   $timeout = probe_env('DB_TIMEOUT', (string) SQLConfig::DEFAULT_TIMEOUT);
+   $poolMin = probe_env('DB_POOL_MIN', (string) SQLConfig::DEFAULT_POOL_MIN);
+   $poolMax = probe_env('DB_POOL_MAX', (string) SQLConfig::DEFAULT_POOL_MAX);
+   $statements = probe_env('DB_STATEMENTS', (string) SQLConfig::DEFAULT_STATEMENTS);
+
+   return new SQLConfig([
+      'driver' => probe_env('DB_CONNECTION', SQLConfig::DEFAULT_DRIVER),
+      'host' => probe_env('DB_HOST', SQLConfig::DEFAULT_HOST),
+      'port' => is_numeric($port) ? (int) $port : SQLConfig::DEFAULT_PORT,
+      'database' => probe_env('DB_NAME', SQLConfig::DEFAULT_DATABASE),
+      'username' => probe_env('DB_USER', SQLConfig::DEFAULT_USERNAME),
+      'password' => probe_env('DB_PASS', SQLConfig::DEFAULT_PASSWORD),
+      'timeout' => is_numeric($timeout) ? (float) $timeout : SQLConfig::DEFAULT_TIMEOUT,
+      'statements' => is_numeric($statements) ? (int) $statements : SQLConfig::DEFAULT_STATEMENTS,
+      'pool' => [
+         'min' => is_numeric($poolMin) ? (int) $poolMin : SQLConfig::DEFAULT_POOL_MIN,
+         'max' => is_numeric($poolMax) ? (int) $poolMax : SQLConfig::DEFAULT_POOL_MAX,
+      ],
+      'secure' => [
+         'mode' => probe_env('DB_SSLMODE', SQLConfig::SECURE_DISABLE),
+         'verify' => probe_bool('DB_SSLVERIFY', false),
+         'peer' => probe_env('DB_SSLPEER', ''),
+         'cafile' => probe_env('DB_SSLCAFILE', ''),
+      ],
+   ]);
+}
+
+/**
+ * Read a bool-like environment variable.
+ */
+function probe_bool (string $key, bool $default): bool
+{
+   $value = strtolower(probe_env($key, $default ? 'true' : 'false'));
+
+   return $value === '1' || $value === 'true' || $value === 'yes' || $value === 'on';
 }
 
 /**
@@ -655,16 +722,32 @@ function probe_server (string $Root): void
       host: '127.0.0.1',
       port: $port,
       workers: 1,
+      responseResources: [
+         'Database' => static function (object $Context): DatabaseResource {
+            static $Database = null;
+
+            if ($Context instanceof Response === false) {
+               throw new RuntimeException('Database response resource expects a Response context.');
+            }
+
+            if ($Database instanceof SQL === false) {
+               $Database = new SQL(probe_sql_config());
+            }
+
+            return new DatabaseResource($Database);
+         },
+      ],
    );
 
    $HTTP_Server_CLI->on(
-      requestReceived: static function (Request $Request, Response $Response, Router $Router) use ($Root, $dbSleep, $loadDelay) {
+      Events::RequestReceived,
+      static function (Request $Request, Response $Response, Router $Router) use ($dbSleep, $loadDelay) {
          yield $Router->route('/fast', function (Request $Request, Response $Response) {
             return $Response(body: 'FAST');
          }, GET);
 
          yield $Router->route('/load', function (Request $Request, Response $Response) use ($loadDelay) {
-            return $Response->defer(function () use ($Response, $loadDelay) {
+            return $Response->defer(function (Response $Response) use ($loadDelay): void {
                $started = microtime(true);
 
                while (microtime(true) - $started < $loadDelay) {
@@ -675,68 +758,19 @@ function probe_server (string $Root): void
             });
          }, GET);
 
-         yield $Router->route('/db-sleep', function (Request $Request, Response $Response) use ($Root, $dbSleep) {
-            return $Response->defer(function () use ($Response, $Root, $dbSleep) {
+         yield $Router->route('/db-sleep', function (Request $Request, Response $Response) use ($dbSleep) {
+            return $Response->defer(function (Response $Response) use ($dbSleep): void {
                try {
-                  $Configs = new Configs($Root . '/projects/Demo-HTTP_Server_CLI/configs/');
-                  $Configs->allow('database', [
-                     'DB_CONNECTION',
-                     'DB_ENABLED',
-                     'DB_HOST',
-                     'DB_NAME',
-                     'DB_PASS',
-                     'DB_POOL_MAX',
-                     'DB_POOL_MIN',
-                     'DB_PORT',
-                     'DB_SSLCAFILE',
-                     'DB_SSLMODE',
-                     'DB_SSLPEER',
-                     'DB_SSLVERIFY',
-                     'DB_STATEMENTS',
-                     'DB_TIMEOUT',
-                     'DB_USER',
-                  ]);
-                  $Scope = $Configs->get('database');
-
-                  if ($Scope instanceof Config === false || $Scope->Enabled->get() !== true) {
+                  if (probe_bool('DB_ENABLED', true) === false) {
                      $Response(code: 500, body: 'database config disabled');
 
                      return;
                   }
 
-                  $Database = new Database((new DatabaseConfig($Scope))->configure());
-                  $Operation = $Database->query('SELECT pg_sleep($1::float8), $2::int AS value', [$dbSleep, 42]);
+                  $Database = $Response->Database;
+                  $Result = $Database->fetch('SELECT pg_sleep($1::float8), $2::int AS value', [$dbSleep, 42]);
 
-                  for ($steps = 0; $Operation->finished === false && $steps < 1000; $steps++) {
-                     $Operation = $Database->advance($Operation);
-
-                     if ($Operation->finished) {
-                        break;
-                     }
-
-                     $Readiness = $Operation->Readiness;
-
-                     if ($Readiness !== null) {
-                        $Response->wait($Readiness);
-                     }
-                     else {
-                        $Response->wait();
-                     }
-                  }
-
-                  if ($Operation->error !== null) {
-                     $Response(code: 500, body: $Operation->error);
-
-                     return;
-                  }
-
-                  if ($Operation->Result === null) {
-                     $Response(code: 500, body: 'no database result');
-
-                     return;
-                  }
-
-                  $Response(body: json_encode($Operation->Result->rows) ?: 'json error');
+                  $Response(body: json_encode($Result->rows) ?: 'json error');
                }
                catch (Throwable $Throwable) {
                   $Response(code: 500, body: $Throwable->getMessage());

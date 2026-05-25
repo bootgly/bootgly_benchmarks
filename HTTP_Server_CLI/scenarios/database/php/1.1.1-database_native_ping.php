@@ -1,10 +1,14 @@
 <?php
-// @label: Database native ping
-// @group: Database native low-level
-// @competitors: Bootgly
-// Low-level ADI PostgreSQL ping through manual advance/readiness loop.
+// @label: Database micro query
+// @group: Database microbenchmarks
+// @competitors: Bootgly,Swoole Database
+// Minimal SELECT 1 helper overhead.
 
 return [
    'method' => 'GET',
-   'paths'  => ['/database/native/ping'],
+   'paths' => ['/database/native/ping'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['"ok":1'],
+   ],
 ];

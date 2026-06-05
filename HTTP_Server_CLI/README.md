@@ -624,6 +624,14 @@ Each report carries an environment block (auto-detected OS, CPU, PHP, Swoole), a
 reproduction command, throughput/ratio charts, per-load comparison tables, and a
 peaks summary.
 
+#### Latest reports
+
+**TechEmpower** (`techempower` DB routes) — [full report](results/RESULTS-database-2026-06-02_225702.md):
+
+| Throughput | Ratio vs Bootgly |
+|:--:|:--:|
+| ![Database throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/RESULTS-database-2026-06-02_225702.chart.throughput.png) | ![Database ratio](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/RESULTS-database-2026-06-02_225702.chart.ratio.png) |
+
 #### 1. One-time setup
 
 ```bash

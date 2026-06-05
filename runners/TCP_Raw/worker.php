@@ -4,14 +4,14 @@
  * Bootgly PHP Framework — TCP_Raw Benchmark Worker
  * --------------------------------------------------------------------------
  * Standalone subprocess that generates raw TCP load using TCP_Client_CLI.
- * Spawned by TCP_Raw runner per scenario.
+ * Spawned by TCP_Raw runner per load.
  *
  * Usage:
  *   php worker.php --host=127.0.0.1 --port=8083 --connections=514
- *                  --duration=10 --scenario-file=/tmp/scenario.json
+ *                  --duration=10 --load-file=/tmp/load.json
  *                  [--workers=4]
  *
- * Scenario JSON format:
+ * Load JSON format:
  *   {"message": "PING\n", "delimiter": "\n"}
  *   {"message": "GET / HTTP/1.1\r\n...", "delimiter": "HTTP/1."}
  *
@@ -62,7 +62,7 @@ $opts = getopt('', [
    'port:',
    'connections:',
    'duration:',
-   'scenario-file:',
+   'load-file:',
    'workers:',
 ]);
 
@@ -70,20 +70,20 @@ $host          = $opts['host']          ?? '127.0.0.1';
 $port          = (int) ($opts['port']          ?? 8083);
 $connections   = (int) ($opts['connections']   ?? 514);
 $duration      = (int) ($opts['duration']      ?? 10);
-$scenarioFile  = $opts['scenario-file'] ?? '';
+$loadFile  = $opts['load-file'] ?? '';
 
-if ($scenarioFile === '' || !\file_exists($scenarioFile)) {
-   \fwrite(\STDERR, "ERROR: --scenario-file is required and must exist.\n");
+if ($loadFile === '' || !\file_exists($loadFile)) {
+   \fwrite(\STDERR, "ERROR: --load-file is required and must exist.\n");
    exit(1);
 }
 
 
 // ---------------------------------------------------------------------------
-// Load scenario
+// Load load
 // ---------------------------------------------------------------------------
-$json = file_get_contents($scenarioFile);
+$json = file_get_contents($loadFile);
 if ($json === false) {
-   \fwrite(\STDERR, "ERROR: Cannot read scenario file.\n");
+   \fwrite(\STDERR, "ERROR: Cannot read load file.\n");
    exit(1);
 }
 
@@ -96,7 +96,7 @@ if (
    || $decoded['message'] === ''
    || $decoded['delimiter'] === ''
 ) {
-   \fwrite(\STDERR, "ERROR: Invalid scenario data. Need 'message' and 'delimiter'.\n");
+   \fwrite(\STDERR, "ERROR: Invalid load data. Need 'message' and 'delimiter'.\n");
    exit(1);
 }
 

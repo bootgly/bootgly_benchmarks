@@ -1,104 +1,170 @@
-# ⏱️ Benchmark - Template Engine (`foreach` directive)
+# ⏱️ Benchmark — Template Engine (`foreach` directive)
 
-In this benchmark, we will compare the performance of the `foreach` directive in different template engines. The `foreach` directive is commonly used to iterate over a collection of data and generate dynamic content.
+Benchmarks the **Bootgly Template Engine** `foreach` directive against Laravel
+Blade, iterating over a large collection (1,000,000 items) — measuring raw
+directive rendering speed without sacrificing features.
 
-## � Quick Start
+---
+
+## 📋 Table of Contents
+
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Loads](#-loads)
+- [Runners](#-runners)
+- [Competitors](#-competitors)
+- [Configuration](#-configuration)
+- [Running Benchmarks](#-running-benchmarks)
+- [Context](#-context)
+- [Environment Notes](#-environment-notes)
+- [Results](#-results)
+
+---
+
+## ✅ Prerequisites
+
+| Dependency | Purpose | Required |
+|-----------|---------|----------|
+| **PHP** ≥ 8.4 | Runtime | ✅ |
+| **Composer** | Installs the Laravel Blade competitor | Only for the `laravel` competitor |
+
+---
+
+## 🔧 Installation
+
+> `bootgly` and `bootgly_benchmarks` sit **side by side** in the same parent
+> directory — the runner resolves the framework via that relative layout.
 
 ```bash
-# Clone both repositories side by side
 git clone https://github.com/bootgly/bootgly.git
 git clone https://github.com/bootgly/bootgly_benchmarks.git
-
-# Install Laravel Blade dependency
-cd bootgly_benchmarks/Template_Engine/artifacts/laravel
-composer install
-cd ../../../..
-
-# Run the benchmark
-cd bootgly
-./bootgly test benchmark Template_Engine
 ```
 
-This case uses the **Code** runner, which executes each competitor as a subprocess and measures time and memory.
+The Bootgly competitor needs nothing extra. For the Laravel Blade competitor,
+install its dependencies once:
 
-### Options
+```bash
+cd bootgly_benchmarks/Template_Engine/bootables/laravel
+composer install
+```
+
+---
+
+## 🎯 Loads
+
+This case uses the **Code** runner, so there are no request loads — each competitor
+renders one fixed template as a subprocess:
+
+| Workload | Description |
+|----------|-------------|
+| `foreach` render | A `@foreach` directive iterating over **1,000,000 items**, empty body |
+
+The timer wraps only the `foreach` iteration (start recorded just before, end
+immediately after) so other factors do not affect accuracy.
+
+---
+
+## 🔧 Runners
+
+Uses the **Code** runner (`runners/Code.php`), which executes each competitor as a
+subprocess and measures wall-clock time and peak memory. Best result over
+`--iterations` is kept.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--competitors=NAME,...` | all | Filter competitors (`bootgly`, `laravel`) |
-| `--iterations=N` | `1` | Number of iterations per competitor |
+| `--iterations=N` | `1` | Iterations per competitor (best is kept) |
 | `--timeout=N` | `120` | Timeout in seconds per execution |
 | `--warmup=N` | `0` | Warmup iterations (discarded) |
 
-### Example
+---
+
+## 🏁 Competitors
+
+| Competitor | Runtime | Engine | CLI name |
+|-----------|---------|--------|----------|
+| **Bootgly** | PHP | `ABI\Templates\Template` | `bootgly` |
+| **Laravel** | PHP | Blade (`Illuminate\View`) | `laravel` |
+
+Each competitor lives in its own folder under `opponents/` and self-registers via
+its own `@.php` (auto-discovered with `glob(opponents/*/@.php)` — you never edit the
+case's main `@.php`).
+
+---
+
+## ⚙️ Configuration
+
+### Contextual Help
 
 ```bash
-./bootgly test benchmark Template_Engine --competitors=bootgly,laravel --iterations=3
-```
+# Tier 1 — list available cases
+./bootgly test benchmark --help
 
-### Help
-
-```bash
+# Tier 2 — case-specific options (Code runner options + competitors)
 ./bootgly test benchmark Template_Engine --help
 ```
 
 ---
 
-## �🔍 Context
+## 🚀 Running Benchmarks
 
-The goal is to determine which template engine performs the best in terms of speed and efficiency when iterating over a large collection of data.
+All commands run from the **bootgly** directory.
 
-We will compare the performance of the `foreach` directive in the following template engines:
+```bash
+# All competitors, defaults
+./bootgly test benchmark Template_Engine
 
-- Bootgly Template Engine
-- Blade
+# Both competitors, 3 iterations (best kept)
+./bootgly test benchmark Template_Engine --competitors=bootgly,laravel --iterations=3
 
-The benchmark will focus on the rendering time of each template engine and will exclude any application processing within the loop.
+# Bootgly only
+./bootgly test benchmark Template_Engine --competitors=bootgly
+```
 
-The benchmark will be executed through a `CLI` interface.
+### Global options
 
-The test involves iterating over a collection of `1,000,000 items`.
-
-The start time in microtime is recorded just before the `foreach` directive begins iterating over the collection, and the end time is recorded immediately after the `foreach` directive finishes iterating. This approach ensures that other factors do not affect the accuracy of the results.
-
-The total time taken is then calculated and displayed on the terminal.
-
-It's important to note that the Bootgly template engine does not sacrifice any of the features available in the Blade's foreach directive. These features include:
-
-- Access to the loop variable for additional information (like `loop->index`, `loop->count`, `loop->first`, `loop->last`, etc.)
-- Ability to use `@continue` and `@break` directives within the loop
-
----
-
-**Interface:**
-
-ABI
-
-**Platform:**
-
--- None --
-
-**Workable:**
-
--- None --
+| Option | Description |
+|--------|-------------|
+| `--competitors=NAME,...` | Filter competitors (`bootgly`, `laravel`) |
+| `--iterations=N` | Iterations per competitor |
+| `--timeout=N` | Timeout in seconds per execution |
+| `--warmup=N` | Warmup iterations (discarded) |
 
 ---
 
+## 🔍 Context
+
+The goal is to determine which template engine performs best when iterating over a
+large collection of data. The benchmark focuses on rendering time and excludes any
+application processing within the loop. Executed through a `CLI` interface over a
+collection of **1,000,000 items**.
+
+The Bootgly engine does **not** sacrifice any feature available in Blade's
+`foreach`:
+
+- Access to the loop variable (`loop->index`, `loop->count`, `loop->first`, `loop->last`, …)
+- `@continue` and `@break` directives within the loop
+
+**Interface:** ABI &nbsp;·&nbsp; **Platform:** none &nbsp;·&nbsp; **Workable:** none
+
+---
+
+## ⚠️ Environment Notes
+
+- **Subprocess isolation**: each competitor runs in its own PHP process; memory is the peak of that process.
+- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between competitors stays consistent across environments. If Bootgly is faster in one environment, it is faster in others, even if the exact speedup factor varies.
+- **Best-of-N**: with `--iterations>1`, the fastest run is reported to reduce noise.
+
+---
 
 ## 📊 Results
 
-> Bootgly Template Engine is ≈ 9x faster than Laravel Blade (without sacrificing features)
+> Bootgly Template Engine is ≈ 9x faster than Laravel Blade (without sacrificing features).
 
-Framework | Result | Position
---- | --- | ---
-Bootgly | 0.046s | 🥇 First (winner)
-Laravel | 0.438s | 🥈 Second
+| Framework | Result | Position |
+|-----------|--------|----------|
+| Bootgly | 0.046s | 🥇 First (winner) |
+| Laravel | 0.438s | 🥈 Second |
 
----
-
-By comparing the times taken by the foreach directive in the Bootgly Template Engine and Blade, we can gain insights into the relative performance of these two template engines when handling large collections of data. This information can be useful when choosing a template engine for projects that involve processing large amounts of data.
-
-> [!WARNING]
-> It's important to note that the exact numbers in the benchmark results may vary depending on the specific environment and resources where the benchmark is being run. Factors such as the hardware specifications, the operating system, the PHP version, and other running processes can all influence the performance of the template engines.
-> 
-> However, while the exact numbers may vary, the relative performance or the proportion between the results should remain consistent. That is, if the Bootgly Template Engine is faster than Laravel Blade in one environment, it should be faster in other environments as well, even if the exact speedup factor varies. This consistency in relative performance makes the benchmark a useful tool for comparing the efficiency of different template engines, regardless of the specific environment where they are run.
+Each run also saves a plain-text `.bench.marks` file under
+`bootgly/workdata/tests/benchmarks/Template_Engine/`. See
+[`scripts/README.md`](../scripts/README.md) for chart generation.

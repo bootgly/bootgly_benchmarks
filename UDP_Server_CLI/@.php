@@ -8,9 +8,6 @@
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
-
-
 // @ Select runner
 $runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'udp_raw');
 
@@ -25,14 +22,12 @@ $Runner->port = 8084;
 $Runner->connections = 514;
 $Runner->duration = 10;
 
-// @ Load PHP scenarios
-$Runner->load(__DIR__ . '/scenarios/php');
+// @ Load PHP loads
+$Runner->load(__DIR__ . '/loads');
 
-// @ Add competitors
-$Runner->add(new Competitor(
-   name: 'Bootgly',
-   version: fn () => 'v' . BOOTGLY_VERSION,
-   script: __DIR__ . '/competitors/bootgly.php',
-));
+// @ Auto-register competitors — each folder self-registers via its own @.php
+foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
+   require $opponentFile;
+}
 
 return $Runner;

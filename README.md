@@ -74,14 +74,13 @@ Available cases:
 
 The benchmark framework lives in `bootgly/Bootgly/ACI/Tests/Benchmark/` and provides:
 
-- **Configs** — parsed CLI options (`--competitors`, `--runner`, `--scenarios`, `--vary`)
+- **Configs** — parsed CLI options (`--competitors`, `--runner`, `--loads`, `--vary`)
 - **Competitor** — a named entry (with version and script path) to benchmark against
-- **Runner** — abstract executor that drives each benchmark. Three built-in runners:
+- **Runner** — abstract executor that drives each benchmark. Built-in runners:
   | Runner | CLI Name | Use Case |
   |--------|----------|----------|
   | Code | `code` | Local code execution (time + memory) |
   | TCP_Client | `tcp_client` | HTTP load testing via Bootgly's TCP client |
-  | WRK | `wrk` | HTTP load testing via external [wrk](https://github.com/wg/wrk) tool |
-- **Scenario** — a request distribution script (Lua for WRK, PHP for TCP_Client)
+- **Load** — a request distribution script (PHP for TCP_Client)
 
 Each benchmark case has a `@.php` entry-point that selects a runner, configures it, and registers competitors.

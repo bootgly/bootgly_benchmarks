@@ -4,7 +4,7 @@
  * Bootgly PHP Framework — Benchmark Worker
  * --------------------------------------------------------------------------
  * Standalone subprocess that generates HTTP load using TCP_Client_CLI.
- * Spawned by tcp_client runner per scenario.
+ * Spawned by tcp_client runner per load.
  *
  * Usage:
  *   php worker.php --host=127.0.0.1 --port=8082 --connections=514
@@ -94,15 +94,15 @@ if (
    || !\is_array($decoded['paths'])
    || $decoded['paths'] === []
 ) {
-   \fwrite(\STDERR, "ERROR: Invalid scenario data.\n");
+   \fwrite(\STDERR, "ERROR: Invalid load data.\n");
    exit(1);
 }
 
-/** @var array{method: string, paths: array<string>} $scenario */
-$scenario = $decoded;
+/** @var array{method: string, paths: array<string>} $load */
+$load = $decoded;
 
-$method    = $scenario['method'];
-$paths     = $scenario['paths'];
+$method    = $load['method'];
+$paths     = $load['paths'];
 $pathCount = count($paths);
 
 // @ Pre-build raw HTTP request bytes (zero allocation in hot path)

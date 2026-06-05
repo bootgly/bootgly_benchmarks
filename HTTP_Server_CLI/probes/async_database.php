@@ -194,12 +194,12 @@ function probe (string $BenchmarksRoot, string $BootglyRoot): bool
 
    $serverLog = sys_get_temp_dir() . '/bootgly-adi-async-database-probe-server.log';
    $loadLog = sys_get_temp_dir() . '/bootgly-adi-async-database-probe-load.log';
-   $scenarioFile = probe_load_scenario();
+   $loadFile = probe_build_load();
    $Server = probe_server_start($BootglyRoot, $serverLog);
    $Load = null;
 
    if ($Server === null) {
-      @unlink($scenarioFile);
+      @unlink($loadFile);
 
       return false;
    }
@@ -212,7 +212,7 @@ function probe (string $BenchmarksRoot, string $BootglyRoot): bool
          return false;
       }
 
-      $Load = probe_load_start($tcpWorker, $port, $connections, $duration, $clientWorkers, $pipeline, $scenarioFile, $loadLog);
+      $Load = probe_load_start($tcpWorker, $port, $connections, $duration, $clientWorkers, $pipeline, $loadFile, $loadLog);
 
       if ($Load === null) {
          probe_line('FAIL: could not start Bootgly TCP_Client_CLI load worker.');
@@ -282,16 +282,16 @@ function probe (string $BenchmarksRoot, string $BootglyRoot): bool
       }
 
       probe_server_stop($Server);
-      @unlink($scenarioFile);
+      @unlink($loadFile);
    }
 }
 
 /**
- * Build a temporary TCP_Client_CLI scenario that keeps load on /load.
+ * Build a temporary TCP_Client_CLI load that keeps load on /load.
  */
-function probe_load_scenario (): string
+function probe_build_load (): string
 {
-   $file = sys_get_temp_dir() . '/bootgly-adi-async-database-probe-scenario-' . microtime(true) . '.json';
+   $file = sys_get_temp_dir() . '/bootgly-adi-async-database-probe-load-' . microtime(true) . '.json';
    file_put_contents($file, json_encode([
       'method' => 'GET',
       'paths' => ['/load'],
@@ -401,7 +401,7 @@ function probe_load_start (
    int $duration,
    int $workers,
    int $pipeline,
-   string $scenarioFile,
+   string $loadFile,
    string $log
 ): mixed
 {
@@ -411,7 +411,7 @@ function probe_load_start (
       . ' --port=' . $port
       . ' --connections=' . $connections
       . ' --duration=' . $duration
-      . ' --paths-file=' . escapeshellarg($scenarioFile)
+      . ' --paths-file=' . escapeshellarg($loadFile)
       . ' --workers=' . $workers;
 
    if ($pipeline > 1) {

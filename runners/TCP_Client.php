@@ -12,8 +12,8 @@ use Bootgly\ACI\Tests\Benchmark\Competitor;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
-use Bootgly\ACI\Tests\Benchmark\Configs\Scenario;
-use Bootgly\ACI\Tests\Benchmark\Configs\Scenarios;
+use Bootgly\ACI\Tests\Benchmark\Configs\Load;
+use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
 
 
 return new class (
@@ -72,6 +72,17 @@ return new class (
             $Competitor->workers = $serverWorkers;
          }
       }
+
+      // ! Materialise the auto client-worker count so $this->meta captures the
+      //   resolved value (nproc / 2) instead of the `0` auto sentinel.
+      $this->workers = $this->resolveClientWorkers();
+
+      // @ Surface active runner config for the `.marks` Config header.
+      //   TestCommand merges this into the metadata block written by Summary::save.
+      $this->meta['connections']    = $this->connections;
+      $this->meta['duration']       = $this->duration;
+      $this->meta['client-workers'] = $this->workers;
+      $this->meta['pipeline']       = $this->pipeline;
    }
    public function options (): array
    {
@@ -84,17 +95,17 @@ return new class (
    }
 
    /**
-    * Load scenarios from a directory of .php files.
+    * Load loads from a directory of .php files.
     *
-    * @param string $scenariosDir Absolute path.
+    * @param string $loadsDir Absolute path.
     */
-   public function load (string $scenariosDir): void
+   public function load (string $loadsDir): void
    {
-      $this->scenarios = Scenarios::loadPhp($scenariosDir);
+      $this->loads = Loads::loadPhp($loadsDir);
    }
    /**
     * Resolve the client worker count.
-    * When workers = 0 (auto), defaults to nproc / 2 (similar to wrk threads).
+    * When workers = 0 (auto), defaults to nproc / 2.
     */
    private function resolveClientWorkers (): int
    {
@@ -179,15 +190,15 @@ return new class (
          exit(130);
       });
 
-      // @ Pre-filter scenarios for counting
-      $filteredScenarios = [];
-      foreach ($this->scenarios as $index => $Scenario) {
-         if ($Configs->scenarios !== null && !in_array($index + 1, $Configs->scenarios)) {
+      // @ Pre-filter loads for counting
+      $filteredLoads = [];
+      foreach ($this->loads as $index => $Load) {
+         if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
             continue;
          }
-         $filteredScenarios[$index] = $Scenario;
+         $filteredLoads[$index] = $Load;
       }
-      $totalScenarios = count($filteredScenarios);
+      $totalLoads = count($filteredLoads);
 
       foreach ($this->competitors as $Competitor) {
          // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
@@ -257,33 +268,33 @@ return new class (
             // @ Let server recover from warmup connection cleanup
             sleep(2);
 
-            // @ Run scenarios
-            $scenarioNum = 0;
+            // @ Run loads
+            $loadNum = 0;
             $prevGroup = '';
 
-            foreach ($this->scenarios as $index => $Scenario) {
-               // ? Filter by scenario index (1-based)
-               if ($Configs->scenarios !== null && !in_array($index + 1, $Configs->scenarios)) {
+            foreach ($this->loads as $index => $Load) {
+               // ? Filter by load index (1-based)
+               if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
                   continue;
                }
 
-               // ? Skip if scenario restricts competitors
+               // ? Skip if load restricts competitors
                if (
-                  $Scenario->competitors !== 'all'
-                  && !in_array($Competitor->name, explode(',', $Scenario->competitors))
+                  $Load->competitors !== 'all'
+                  && !in_array($Competitor->name, explode(',', $Load->competitors))
                ) {
                   continue;
                }
 
                // @ Group header
-               if ($Scenario->group !== '' && $Scenario->group !== $prevGroup) {
-                  echo "    {$BOLD}{$Scenario->group}{$RESET}\n";
-                  $prevGroup = $Scenario->group;
+               if ($Load->group !== '' && $Load->group !== $prevGroup) {
+                  echo "    {$BOLD}{$Load->group}{$RESET}\n";
+                  $prevGroup = $Load->group;
                }
 
-               $scenarioNum++;
+               $loadNum++;
 
-               $Result = $this->command($Scenario, $roundConnections, $roundClientWorkers);
+               $Result = $this->command($Load, $roundConnections, $roundClientWorkers);
 
                // @ Real-time result
                $rps = $Result->rps !== null
@@ -296,10 +307,10 @@ return new class (
                   ? "  {$DIM}({$Result->latency}){$RESET}"
                   : '';
 
-               echo "    {$DIM}[{$scenarioNum}/{$totalScenarios}]{$RESET} {$Scenario->label}...  {$rps}{$transfer}{$latency}\n";
+               echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}\n";
 
-               // @ Keep best RPS per scenario
-               $label = $Scenario->label;
+               // @ Keep best RPS per load
+               $label = $Load->label;
                if (
                   !isset($bestResults[$label])
                   || ($Result->rps !== null && ($bestResults[$label]->rps === null || $Result->rps > $bestResults[$label]->rps))
@@ -431,22 +442,22 @@ return new class (
 
       @unlink($tmpFile);
    }
-   private function command (Scenario $Scenario, int $connections = 0, int $clientWorkers = 0): Result
+   private function command (Load $Load, int $connections = 0, int $clientWorkers = 0): Result
    {
       $workerScript = __DIR__ . '/TCP_Client/worker.php';
       $connections = $connections > 0 ? $connections : $this->connections;
       $clientWorkers = $clientWorkers > 0 ? $clientWorkers : $this->resolveClientWorkers();
 
-      // @ Load scenario data from PHP file
-      $scenarioData = include $Scenario->file;
+      // @ Load load data from PHP file
+      $loadData = include $Load->file;
 
-      if (is_array($scenarioData) === false) {
-         echo "      Preflight failed: invalid scenario data.\n";
+      if (is_array($loadData) === false) {
+         echo "      Preflight failed: invalid load data.\n";
 
          return new Result();
       }
 
-      $preflight = $this->preflight($scenarioData);
+      $preflight = $this->preflight($loadData);
 
       if ($preflight !== '') {
          echo "      Preflight failed: {$preflight}\n";
@@ -454,13 +465,13 @@ return new class (
          return new Result();
       }
 
-      // @ Write scenario paths to temp file
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_scenario_');
+      // @ Write load paths to temp file
+      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_load_');
       if ($tmpFile === false) {
          return new Result();
       }
 
-      file_put_contents($tmpFile, json_encode($scenarioData));
+      file_put_contents($tmpFile, json_encode($loadData));
 
       // @ Run worker subprocess
       $output = [];
@@ -485,23 +496,23 @@ return new class (
    }
 
    /**
-    * Verify one scenario returns the expected HTTP response before timing load.
+    * Verify one load returns the expected HTTP response before timing load.
     *
-    * @param array<string,mixed> $scenario
+    * @param array<string,mixed> $load
     */
-   private function preflight (array $scenario): string
+   private function preflight (array $load): string
    {
-      $method = $scenario['method'] ?? 'GET';
-      $paths = $scenario['paths'] ?? [];
-      $expect = $scenario['expect'] ?? [];
-      $strict = isset($scenario['expect']);
+      $method = $load['method'] ?? 'GET';
+      $paths = $load['paths'] ?? [];
+      $expect = $load['expect'] ?? [];
+      $strict = isset($load['expect']);
 
       if (is_string($method) === false || $method === '') {
-         return 'scenario method must be a non-empty string';
+         return 'load method must be a non-empty string';
       }
 
       if (is_array($paths) === false || $paths === []) {
-         return 'scenario paths must be a non-empty array';
+         return 'load paths must be a non-empty array';
       }
 
       if (is_array($expect) === false) {
@@ -521,7 +532,7 @@ return new class (
 
       foreach ($paths as $path) {
          if (is_string($path) === false || $path === '') {
-            return 'scenario path must be a non-empty string';
+            return 'load path must be a non-empty string';
          }
 
          $response = $this->request($method, $path);
@@ -555,7 +566,7 @@ return new class (
    }
 
    /**
-    * Send one short HTTP request for scenario preflight.
+    * Send one short HTTP request for load preflight.
     *
     * @return array{status:int,body:string,error:string}
     */

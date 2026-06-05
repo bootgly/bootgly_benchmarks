@@ -1,175 +1,26 @@
-# ⏱️ Benchmark — HTTP Server CLI (Router Performance)
+# ⏱️ Benchmark — HTTP Server CLI
 
-Comprehensive router-level benchmark comparing **Bootgly HTTP Server CLI** against popular PHP HTTP servers.
+Benchmarks for **Bootgly HTTP Server CLI**, split into two **load sets**:
 
-Unlike simple "Hello, World!" benchmarks, this suite tests **real routing patterns**: static routes, dynamic parameters, nested groups, per-route middleware, and catch-all handlers — the kind of workload a production application actually sees.
+- **`techempower`** — the six canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more competitors in Phase 2).
+- **`benchmark`** — a Bootgly-internal stress surface (100 static, 100 dynamic, nested groups, per-route middleware, catch-all, plus DB probes) for **self-comparison during framework development**. Bootgly-only.
+
+Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching router with `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>`.
 
 ---
 
 ## 📋 Table of Contents
 
-- [Route Specification](#-route-specification)
-- [Benchmark Scenarios](#-benchmark-scenarios)
-- [Runners](#-runners)
-- [Competitors](#-competitors)
 - [Prerequisites](#-prerequisites)
 - [Installation](#-installation)
+- [Loads](#-loads)
+- [Runners](#-runners)
+- [Competitors](#-competitors)
+- [Configuration](#-configuration)
 - [Running Benchmarks](#-running-benchmarks)
-- [Async Database Probe](#-async-database-probe)
-- [Database Resource Benchmark](#-database-resource-benchmark)
-- [Multi-dimensional Vary](#-multi-dimensional-vary---vary)
-- [Contextual Help](#-contextual-help)
-- [Understanding Results](#-understanding-results)
-- [Adding a New Competitor](#-adding-a-new-competitor)
+- [Probes](#-probes)
 - [Environment Notes](#-environment-notes)
-
----
-
-## 🗺️ Route Specification
-
-Every competitor implements the **same** route set for fair comparison.
-
-### Static Routes (100)
-
-The first 10 are named routes:
-
-| Path | Response Body |
-|------|--------------|
-| `/` | `Home` |
-| `/about` | `About` |
-| `/contact` | `Contact` |
-| `/blog` | `Blog` |
-| `/pricing` | `Pricing` |
-| `/docs` | `Docs` |
-| `/faq` | `FAQ` |
-| `/terms` | `Terms` |
-| `/privacy` | `Privacy` |
-| `/status` | `Status` |
-
-Routes 11–100 follow the pattern `/static/N` → `Static N` (e.g. `/static/11` → `Static 11`).
-
-### Dynamic Routes (100)
-
-The first 10 use distinct path prefixes:
-
-| Pattern | Example Path | Response Body |
-|---------|-------------|--------------|
-| `/user/:id` | `/user/42` | `User: 42` |
-| `/post/:slug` | `/post/hello` | `Post: hello` |
-| `/api/v1/:resource` | `/api/v1/items` | `API: items` |
-| `/category/:name` | `/category/tech` | `Category: tech` |
-| `/tag/:label` | `/tag/php` | `Tag: php` |
-| `/product/:sku` | `/product/ABC-1` | `Product: ABC-1` |
-| `/order/:code` | `/order/ORD-99` | `Order: ORD-99` |
-| `/invoice/:number` | `/invoice/INV-1` | `Invoice: INV-1` |
-| `/review/:rid` | `/review/R-50` | `Review: R-50` |
-| `/comment/:cid` | `/comment/C-10` | `Comment: C-10` |
-
-Routes 11–100 follow the pattern `/dN/:param` → `D{N}: {param}` (e.g. `/d11/foo` → `D11: foo`).
-
-### Nested Routes (6) — 2 groups
-
-| Path | Response Body |
-|------|--------------|
-| `/admin/dashboard` | `Admin Dashboard` |
-| `/admin/settings` | `Admin Settings` |
-| `/admin/users` | `Admin Users` |
-| `/account/profile` | `Account Profile` |
-| `/account/billing` | `Account Billing` |
-| `/account/security` | `Account Security` |
-
-### Middleware Routes (3) — Bootgly only *
-
-| Path | Response Body |
-|------|--------------|
-| `/protected/dashboard` | `Protected Dashboard` |
-| `/protected/settings` | `Protected Settings` |
-| `/protected/profile` | `Protected Profile` |
-
-> \* Only Bootgly applies **real per-route middleware** (`RequestId`). Other competitors implement these as simple path matching (no middleware processing) for fair comparison in mixed scenarios.
-
-### Catch-all
-
-| Pattern | Response |
-|---------|---------|
-| `/*` (any unmatched path) | `404 Not Found` |
-
----
-
-## 🎯 Benchmark Scenarios
-
-Each scenario defines a request distribution. There are two formats — **Lua** scripts (for the WRK runner) and **PHP** scripts (for the TCP_Client runner) — with identical request patterns.
-
-### Scenarios (12)
-
-| # | File | Label | Group | Description |
-|---|------|-------|-------|-------------|
-| 1 | `1.1.1-static_single` | 1 static route | Static | Hits `/` on every request (best-case) |
-| 2 | `1.1.2-static_10` | 10 static routes | Static | Round-robins all 10 named static routes |
-| 3 | `1.1.3-static_100` | 100 static routes | Static | Round-robins all 100 static routes |
-| 4 | `1.2.1-dynamic_1` | 1 dynamic route | Dynamic | `/user/:id` |
-| 5 | `1.2.2-dynamic_10` | 10 dynamic routes | Dynamic | All 10 named dynamic routes with varying params |
-| 6 | `1.2.3-dynamic_100` | 100 dynamic routes | Dynamic | All 100 dynamic routes with varying params |
-| 7 | `1.3.1-catch_all` | Catch-all 404 | Catch-all | All requests hit non-existent paths |
-| 8 | `2.1.1-nested_6` | 6 nested routes | Nested | Admin + Account group routes |
-| 9 | `3.1.1-middleware_3` | 3 middleware routes | Middleware | Protected routes (**Bootgly only**) |
-| 10 | `z.1.1-mixed_8` | Mixed 8 | Mixed | 5 static + 3 dynamic |
-| 11 | `z.1.2-mixed_20` | Mixed 20 | Mixed | 10 static + 10 dynamic |
-| 12 | `z.1.3-full_mix` | Full mix | Mixed | static + dynamic + nested + middleware + 404 |
-
-File extensions: `.lua` (in `scenarios/`) for WRK runner, `.php` (in `scenarios/php/`) for TCP_Client runner.
-
-### `@competitors` Tag
-
-Each scenario has a `@competitors:` header that controls which competitors run it:
-- `all` — every competitor runs the scenario
-- `bootgly` — only Bootgly runs it (e.g., middleware scenario)
-
-Competitors not listed are **automatically skipped** during the benchmark.
-
----
-
-## 🔧 Runners
-
-The HTTP_Server_CLI case supports two runners. The runner is selected via `--runner=NAME` (default: `tcp_client`).
-
-### TCP_Client (default)
-
-Bootgly's built-in HTTP load generator. Uses PHP scenarios from `scenarios/php/`. Supports multi-worker forking and HTTP pipelining.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--client-workers=N` | auto | Number of client worker processes |
-| `--connections=N` | `514` | Number of TCP connections |
-| `--duration=N` | `10` | Benchmark duration in seconds |
-| `--pipeline=N` | `1` | HTTP pipelining factor |
-
-### WRK
-
-Wraps the external [wrk](https://github.com/wg/wrk) HTTP benchmarking tool. Uses Lua scenarios from `scenarios/`.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--threads=N` | `10` | Number of wrk threads |
-
-> **Note:** `wrk` must be installed separately (see [Prerequisites](#-prerequisites)).
-
----
-
-## 🏁 Competitors
-
-| Server | Language / Runtime | Mode |
-|--------|-------------------|------|
-| **Bootgly** HTTP Server CLI | PHP (event-loop) | Baseline |
-| **Workerman** v5 | PHP (event-loop) | Routes |
-| **Swoole** (Base mode) | PHP (C extension) | Reactor per worker |
-| **Swoole** (Process mode) | PHP (C extension) | Master + workers |
-| **Swoole** (Coroutine mode) | PHP (C extension) | Coroutine + fork |
-| **RoadRunner** | Go + PHP (goridge) | PSR-7 worker |
-| **FrankenPHP** | Go + PHP (worker mode) | Caddy-based |
-| **Hyperf** | PHP (Swoole framework) | Full-stack coroutine |
-
-All competitors use `nproc / 2` workers for fair CPU distribution.
+- [Results](#-results)
 
 ---
 
@@ -182,35 +33,27 @@ All competitors use `nproc / 2` workers for fair CPU distribution.
 | **lsof** | Port detection | ✅ |
 | **curl** | Server readiness check | ✅ |
 | **nproc** | CPU count detection | ✅ |
-| **wrk** | HTTP benchmarking tool | Only for `--runner=wrk` |
-| **psql** | Async Database probe control query | Only for async DB probe |
-| **PostgreSQL** | Async Database probe target | Only for async DB probe |
-| **Swoole extension** | Swoole / Hyperf benchmarks | Optional |
-| **FrankenPHP binary** | FrankenPHP benchmarks | Optional |
+| **PostgreSQL** | DB loads (`/db`, `/query`, `/fortunes`, `/updates`) + Probes | Only for DB loads |
+| **psql** | Seeds the TechEmpower tables + Probe control query | Only for DB loads |
+| **Swoole extension** + `pdo_pgsql` | `swoole-techempower` competitor | Only for cross-framework |
+| **FrankenPHP binary** | Phase 2 competitors | Optional |
 
 ---
 
 ## 🔧 Installation
 
-### 1. Clone repositories (side by side)
+> `bootgly` and `bootgly_benchmarks` sit **side by side** in the same parent
+> directory — the runner resolves the framework via that relative layout.
+
+### 1. Install competitor dependencies
+
+> The current cross-framework run (`techempower` set) only needs **Bootgly** and
+> **Swoole TechEmpower** (Swoole + `pdo_pgsql`). The servers below —
+> RoadRunner, Workerman, Hyperf, FrankenPHP — are for the **Phase 2**
+> competitors; install them only when their TechEmpower variants land.
 
 ```bash
-git clone https://github.com/bootgly/bootgly.git
-git clone https://github.com/bootgly/bootgly_benchmarks.git
-```
-
-Expected layout:
-
-```
-parent/
-├── bootgly/
-└── bootgly_benchmarks/
-```
-
-### 2. Install competitor dependencies
-
-```bash
-cd bootgly_benchmarks/HTTP_Server_CLI/artifacts
+cd bootgly_benchmarks/HTTP_Server_CLI/bootables
 ```
 
 #### RoadRunner
@@ -233,29 +76,16 @@ cd hyperf && composer install && cd ..
 
 > **Note:** Hyperf requires the Swoole extension with `swoole.use_shortname=Off` in your `php.ini`.
 
-### 3. Install wrk (only for `--runner=wrk`)
-
-```bash
-# Debian/Ubuntu
-sudo apt-get install wrk
-
-# macOS
-brew install wrk
-
-# Build from source
-git clone https://github.com/wg/wrk.git
-cd wrk && make -j$(nproc) && sudo cp wrk /usr/local/bin/
-```
-
-### 4. Install Swoole (optional)
+### 2. Install Swoole (for `swoole-techempower`)
 
 ```bash
 pecl install swoole
 ```
 
-Add `extension=swoole.so` to your `php.ini`.
+Add `extension=swoole.so` to your `php.ini`. The `swoole-techempower` competitor
+also needs `pdo_pgsql` (`php8.4-pgsql` on Debian/Ubuntu).
 
-### 5. Install FrankenPHP (optional)
+### 3. Install FrankenPHP (optional, Phase 2)
 
 ```bash
 curl -fsSL https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64 \
@@ -267,9 +97,346 @@ See: https://frankenphp.dev/docs/install
 
 ---
 
+## 🎯 Loads
+
+The case ships **two load sets**, selected together with
+`BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` (loads) and
+`BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>` (server SAPI). A *load* is one PHP file
+under `loads/<set>/` describing a request pattern (method, paths, expected
+response) for the TCP_Client generator.
+
+### TechEmpower set (`loads/techempower/`)
+
+Six canonical TechEmpower routes, identical across competitors. Backed by
+`projects/Benchmark/HTTP_Server_CLI/router/techempower-benchmark.SAPI.php`.
+
+| # | File | Route | Description |
+|---|------|-------|-------------|
+| 1 | `1.0.1-plaintext` | `GET /plaintext` | `text/plain "Hello, World!"` |
+| 2 | `1.0.2-json` | `GET /json` | `application/json {"message":"Hello, World!"}` |
+| 3 | `1.0.3-db` | `GET /db` | Single random `World` row as JSON |
+| 4 | `1.0.4-query` | `GET /query?queries=20` | Pipeline 20 random `World` fetches |
+| 5 | `1.0.5-fortunes` | `GET /fortunes` | Fortune list rendered as HTML |
+| 6 | `1.0.6-updates` | `GET /updates?queries=20` | 20 random `World` reads + batched UPDATE |
+
+All loads tagged `@competitors: all` — cross-framework fair comparison.
+
+### Bootgly set (`loads/benchmark/`)
+
+Bootgly-internal stress surface, for self-comparison during framework
+development. Backed by
+`projects/Benchmark/HTTP_Server_CLI/router/bootgly-benchmark.SAPI.php`. Every
+load is tagged `@competitors: Bootgly`, so the runner skips cross-framework
+competitors automatically — even if you pass `--competitors=bootgly,swoole-base`.
+
+| # | File | Group | Route(s) |
+|---|------|-------|----------|
+| 1 | `1.1.1-static_single` | Static | `/` on every request |
+| 2 | `1.1.2-static_10` | Static | 10 named static routes |
+| 3 | `1.1.3-static_100` | Static | 100 static routes |
+| 4 | `1.2.1-dynamic_1` | Dynamic | `/user/:id` |
+| 5 | `1.2.2-dynamic_10` | Dynamic | 10 dynamic routes, varying params |
+| 6 | `1.2.3-dynamic_100` | Dynamic | 100 dynamic routes, varying params |
+| 7 | `1.3.1-catch_all` | Catch-all | non-existent paths → `404` |
+| 8 | `2.1.1-nested_6` | Nested | `/admin/*` + `/account/*` groups |
+| 9 | `3.1.1-middleware_3` | Middleware | `/protected/*` (real `RequestId` middleware) |
+| 10 | `z.1.1-mixed_8` | Mixed | 5 static + 3 dynamic |
+| 11 | `z.1.2-mixed_20` | Mixed | 10 static + 10 dynamic |
+| 12 | `z.1.3-full_mix` | Mixed | static + dynamic + nested + middleware + 404 |
+| 13 | `4.1.1-database_native_ping` | DB probe | `/database/native/ping` |
+| 14 | `4.1.2-database_runner_ping` | DB probe | `/database/resource/ping` |
+| 15 | `4.2.1-database_native_parameters` | DB probe | `/database/native/parameters` |
+| 16 | `4.2.2-database_runner_parameters` | DB probe | `/database/resource/parameters` |
+| 17 | `4.3.1-database_native_pool` | DB probe | `/database/native/pool` |
+| 18 | `4.3.2-database_runner_pool` | DB probe | `/database/resource/pool` |
+| 19 | `4.4.1-database_native_sleep` | DB probe | `/database/native/sleep` |
+| 20 | `4.4.2-database_runner_sleep` | DB probe | `/database/resource/sleep` |
+
+### `@competitors` tag
+
+Each load file has a `@competitors:` header controlling which competitors run it:
+
+- `all` — every registered competitor runs the load.
+- `Bootgly` — only Bootgly runs it; other competitors are skipped even when
+  passed via `--competitors=`.
+
+This keeps the cross-framework `techempower` set fair while the `benchmark` set
+stays Bootgly-only.
+
+### Database Benchmark
+
+The cross-framework database comparison is the `techempower` set's four DB routes
+(loads `3,4,5,6`). They are neutral across competitors and run against Bootgly and
+**Swoole TechEmpower**:
+
+| Route | Purpose |
+|-------|---------|
+| `/db` | Fetch one random `World` row |
+| `/query?queries=20` | Fetch 20 random `World` rows |
+| `/fortunes` | Fetch, append, sort, escape, and render `Fortune` rows |
+| `/updates?queries=20` | Fetch and update 20 random `World` rows |
+
+The Bootgly `benchmark` set additionally ships `SELECT 1`, parameterized,
+multi-query, and `pg_sleep` probes (loads `13–20`). They isolate DBAL/resource
+overhead but are Bootgly-only (`@competitors: Bootgly`), not a cross-framework
+comparison:
+
+| Native route | Resource route | Purpose |
+|--------------|----------------|---------|
+| `/database/native/ping` | `/database/resource/ping` | `SELECT 1` helper overhead |
+| `/database/native/parameters` | `/database/resource/parameters` | parameterized query overhead |
+| `/database/native/pool` | `/database/resource/pool` | pool/concurrent operations overhead |
+| `/database/native/sleep` | `/database/resource/sleep` | slow async query overhead |
+
+#### Running
+
+Run from the `bootgly` repository — Bootgly only:
+
+```bash
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
+DB_HOST=127.0.0.1 \
+DB_PORT=5432 \
+DB_NAME=bootgly \
+DB_USER=postgres \
+DB_PASS= \
+DB_SSLMODE=disable \
+DB_SSLVERIFY=false \
+DB_POOL_MAX=1 \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+```
+
+Compare Bootgly with the Swoole TechEmpower competitor:
+
+```bash
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
+DB_HOST=127.0.0.1 \
+DB_PORT=5432 \
+DB_NAME=bootgly \
+DB_USER=postgres \
+DB_PASS= \
+DB_SSLMODE=disable \
+DB_SSLVERIFY=false \
+DB_POOL_MAX=1 \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+```
+
+The Swoole TechEmpower competitor requires PHP extensions `swoole` and `pdo_pgsql`
+(`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL
+pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
+
+#### Tuning notes
+
+From WSL2 / Ryzen 9 3900X / PostgreSQL `max_connections=100`:
+
+- `DB_POOL_MAX=1` per HTTP worker was fastest for short microbenchmarks.
+- On a single machine running client, server, and PostgreSQL together,
+  `--server-workers=24` + `--client-workers=4` is the best balanced full-suite
+  default observed so far.
+- `--server-workers=28` + `--client-workers=5` favored peak ping/parameter
+  throughput, while 24/4 left more CPU headroom for pool-heavy loads.
+- For Swoole comparison, `DB_POOL_MAX=1` is the strict single-connection-per-worker
+  control. `DB_POOL_MAX=3` is the recommended comparison setting; `DB_POOL_MAX=4`
+  uses 96 DB connections at 24 workers and leaves little PostgreSQL headroom while
+  producing similar results.
+- Older `126k..130k req/s` artifacts did not validate HTTP status/body; the current
+  TCP_Client preflight rejects 404/500 before timed runs.
+- `--connections=512` is a lower-latency alternative with similar throughput.
+- The `pg_sleep` loads are async-behavior checks, not TechEmpower loads.
+
+---
+
+## 🔧 Runners
+
+The case uses Bootgly's built-in **TCP_Client** load generator
+(`--runner=tcp_client`, the default — no external tooling required). It loads the
+PHP loads of the active set (`loads/techempower/` or `loads/benchmark/`) and
+supports multi-worker forking and HTTP pipelining.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--client-workers=N` | auto | Number of client worker processes |
+| `--connections=N` | `514` | Number of TCP connections |
+| `--duration=N` | `10` | Benchmark duration in seconds |
+| `--pipeline=N` | `1` | HTTP pipelining factor |
+
+---
+
+## 🏁 Competitors
+
+| Server | Language / Runtime | Mode | Used by |
+|--------|-------------------|------|---------|
+| **Bootgly** HTTP Server CLI | PHP (event-loop) | Baseline | `techempower`, `benchmark` |
+| **Swoole** TechEmpower | PHP (C extension) | PROCESS + PDO pool + `/plaintext` & `/json` | `techempower` |
+| **Workerman** v5 | PHP (event-loop) | Routes | Phase 2 (pending) |
+| **Swoole** (Base mode) | PHP (C extension) | Reactor per worker | Phase 2 (pending) |
+| **Swoole** (Process mode) | PHP (C extension) | Master + workers | Phase 2 (pending) |
+| **Swoole** (Coroutine mode) | PHP (C extension) | Coroutine + fork | Phase 2 (pending) |
+| **RoadRunner** | Go + PHP (goridge) | PSR-7 worker | Phase 2 (pending) |
+| **FrankenPHP** | Go + PHP (worker mode) | Caddy-based | Phase 2 (pending) |
+| **Hyperf** | PHP (Swoole framework) | Full-stack coroutine | Phase 2 (pending) |
+
+All competitors use `nproc / 2` workers for fair CPU distribution.
+
+The TechEmpower set currently runs Bootgly against **Swoole TechEmpower** only.
+The other competitors are still registered but serve the pre-split router routes,
+not the TechEmpower routes — their `/plaintext` + `/json` + four-DB-route variants
+are **Phase 2 (pending)**. Running them against the `techempower` set today fails
+preflight (404 on `/plaintext`).
+
+### Available names
+
+CLI filter values for `--competitors=`:
+
+| Name | Description |
+|------|-------------|
+| `bootgly` | Bootgly HTTP Server CLI (always baseline) |
+| `swoole-techempower` | Swoole PROCESS + PDO pool, six TechEmpower routes |
+| `workerman` | Workerman v5 — Phase 2 (pre-split router routes only) |
+| `swoole-base` | Swoole SWOOLE_BASE mode — Phase 2 |
+| `swoole-process` | Swoole SWOOLE_PROCESS mode — Phase 2 |
+| `swoole-coroutine` | Swoole Coroutine mode — Phase 2 |
+| `roadrunner` | RoadRunner (Go + PHP) — Phase 2 |
+| `frankenphp` | FrankenPHP worker mode — Phase 2 |
+| `hyperf` | Hyperf (Swoole framework) — Phase 2 |
+
+### Adding a competitor
+
+#### 1. Create the competitor script
+
+Each competitor lives in its own folder under `opponents/` and may hold several
+variations (e.g. `opponents/swoole/` has `swoole-base.php`,
+`swoole-techempower.php`, …). Create `opponents/myserver/myserver.php` — it
+starts the HTTP server and blocks until killed:
+
+```php
+<?php
+// Start your server on $port with $workers processes.
+// The runner calls this script as a subprocess and kills it when done.
+```
+
+See existing scripts under `opponents/*/` for the exact pattern (start server,
+listen on `getenv('PORT')`, use `getenv('WORKERS')` for worker count).
+
+#### 2. Create the server artifact
+
+Create `bootables/myserver/` serving the six TechEmpower routes so the competitor
+joins the cross-framework `techempower` set:
+
+- `/plaintext`, `/json`, `/db`, `/query?queries=N`, `/fortunes`, `/updates?queries=N`
+- See `bootables/swoole/swoole-techempower-postgres.php` for the reference implementation.
+
+#### 3. Self-register via `opponents/myserver/@.php`
+
+Each competitor folder ships an `@.php` that registers itself — the case's main
+`@.php` auto-discovers them with `glob(opponents/*/@.php)`, so you never edit it.
+A folder may register several variations (see `opponents/swoole/@.php`):
+
+```php
+<?php
+
+use Bootgly\ACI\Tests\Benchmark\Competitor;
+
+/** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
+
+$Runner->add(new Competitor(
+   name: 'MyServer',
+   version: fn () => 'v1.0.0',
+   script: __DIR__ . '/myserver.php',
+));
+```
+
+The `name` is used as the CLI filter value (lowercased): `--competitors=myserver`.
+
+#### 4. Run
+
+```bash
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,myserver
+```
+
+---
+
+## ⚙️ Configuration
+
+### Router & load set
+
+The active load set and its server SAPI are chosen with two environment variables
+— keep both on the **same** set:
+
+| Env var | Values | Default | Selects |
+|---------|--------|---------|---------|
+| `BOOTGLY_HTTP_SERVER_CLI_LOADS` | `techempower`, `benchmark` | `benchmark` | which loads run (`loads/<set>/`) |
+| `BOOTGLY_HTTP_SERVER_CLI_ROUTER` | `techempower`, `bootgly` | `bootgly` | which SAPI the server mounts |
+
+PostgreSQL loads also read `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`,
+`DB_SSLMODE`, and `DB_POOL_MAX` (see [Database Benchmark](#database-benchmark)).
+
+### Multi-dimensional Vary (`--vary`)
+
+The `--vary` option runs the benchmark across a **cartesian product** of parameter
+values, producing one round per combination.
+
+#### Syntax
+
+```bash
+--vary=key1:value1,key2:value2,...
+```
+
+#### Available dimensions
+
+| Key | Description |
+|-----|-------------|
+| `server-workers` | Number of server worker processes |
+| `connections` | Number of TCP connections |
+| `client-workers` | Number of client worker processes |
+
+#### Examples
+
+```bash
+# 2D: vary server workers and connections
+./bootgly test benchmark HTTP_Server_CLI \
+   --vary=server-workers:4,connections:256
+
+# 3D: full cartesian product
+./bootgly test benchmark HTTP_Server_CLI \
+   --vary=server-workers:4,connections:256,client-workers:8
+```
+
+Round headers show only the dimensions that actually vary (e.g. `4sw/256c` instead
+of `4sw/256c/0cw`).
+
+### Contextual Help
+
+The benchmark CLI provides a two-tier help system.
+
+#### Tier 1 — List available cases
+
+```bash
+./bootgly test benchmark --help
+```
+
+Shows all discovered benchmark cases.
+
+#### Tier 2 — Case-specific options
+
+```bash
+./bootgly test benchmark HTTP_Server_CLI --help
+```
+
+Shows:
+
+- Case configuration (from `@.php`)
+- Runner-specific options (from the selected runner's `options()` method)
+- Case-local options (from `options.php`, e.g. `--server-workers`)
+
+---
+
 ## 🚀 Running Benchmarks
 
-All commands are run from the **bootgly** directory:
+All commands run from the **bootgly** directory:
 
 ```bash
 cd /path/to/bootgly
@@ -277,51 +444,43 @@ cd /path/to/bootgly
 
 ### Basic usage
 
-```bash
-# All competitors, all scenarios (TCP_Client runner, default)
-./bootgly test benchmark HTTP_Server_CLI
+With no env vars, the run defaults to the Bootgly-internal `benchmark` set
+(`BOOTGLY_HTTP_SERVER_CLI_ROUTER=bootgly`, `..._LOADS=benchmark`) — Bootgly-only:
 
-# Bootgly only (baseline)
+```bash
+# Bootgly-internal benchmark set, all loads (default, TCP_Client runner)
 ./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly
-
-# Bootgly vs Workerman
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman
-
-# Bootgly vs multiple competitors
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman,swoole-base,roadrunner
 ```
 
-### Selecting a runner
+Cross-framework comparison uses the `techempower` set plus a TechEmpower
+competitor. The DB routes need PostgreSQL — export `DB_*` (see
+[Database Benchmark](#database-benchmark)):
 
 ```bash
-# Use wrk runner (requires wrk installed)
-./bootgly test benchmark HTTP_Server_CLI --runner=wrk
-
-# Use TCP_Client runner (default, no external dependency)
-./bootgly test benchmark HTTP_Server_CLI --runner=tcp_client
+# Bootgly vs Swoole TechEmpower, six TechEmpower routes
+BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-techempower
 ```
 
-### Filtering scenarios
+### Filtering loads
 
 ```bash
-# Run only scenario 1 (static single) and 10 (mixed 8)
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,workerman --scenarios=1,10
+# Run only load 1 (static single) and 8 (nested 6) of the benchmark set
+./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --loads=1,8
 
-# Run only the 100-route scenarios (3 and 6)
-./bootgly test benchmark HTTP_Server_CLI --scenarios=3,6
+# Run only the 100-route loads (3 and 6)
+./bootgly test benchmark HTTP_Server_CLI --loads=3,6
 ```
 
-### Runner-specific options
+### Runner options (TCP_Client)
 
 ```bash
-# TCP_Client: custom connections and duration
+# Custom connections and duration
 ./bootgly test benchmark HTTP_Server_CLI --connections=256 --duration=15
 
-# TCP_Client: with pipelining and explicit client workers
+# With pipelining and explicit client workers
 ./bootgly test benchmark HTTP_Server_CLI --pipeline=4 --client-workers=8
-
-# WRK: custom threads
-./bootgly test benchmark HTTP_Server_CLI --runner=wrk --threads=8
 ```
 
 ### Case-specific options
@@ -335,33 +494,23 @@ cd /path/to/bootgly
 
 | Option | Description |
 |--------|-------------|
-| `--runner=NAME` | Select runner (`tcp_client`, `wrk`) |
 | `--competitors=NAME,...` | Filter competitors by name |
-| `--scenarios=N,...` | Filter scenarios by 1-based index |
-| `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see below) |
-
-### Available competitor names
-
-| Name | Description |
-|------|-------------|
-| `bootgly` | Bootgly HTTP Server CLI (always baseline) |
-| `workerman` | Workerman v5 |
-| `swoole-base` | Swoole SWOOLE_BASE mode |
-| `swoole-process` | Swoole SWOOLE_PROCESS mode |
-| `swoole-coroutine` | Swoole Coroutine mode |
-| `roadrunner` | RoadRunner (Go + PHP) |
-| `frankenphp` | FrankenPHP worker mode |
-| `hyperf` | Hyperf (Swoole framework) |
+| `--loads=N,...` | Filter loads by 1-based index |
+| `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
 
 ---
 
-## 🧪 Async Database Probe
+## 🩺 Probes
 
-The optional ADI Database probe verifies that a PostgreSQL operation suspended through Bootgly's native event loop does **not** block a single `HTTP_Server_CLI` worker.
+The optional ADI Database probe verifies that a PostgreSQL operation suspended
+through Bootgly's native event loop does **not** block a single `HTTP_Server_CLI`
+worker.
 
-It starts a one-worker Bootgly server, generates load against `/load` with Bootgly's own `TCP_Client_CLI` benchmark worker, opens `/db-sleep` (`SELECT pg_sleep(...)`), confirms the query is active through `pg_stat_activity`, and then requests `/fast`. The probe passes only when `/fast` responds quickly while PostgreSQL is still sleeping.
-
-This probe does **not** require `wrk`.
+It starts a one-worker Bootgly server, generates load against `/load` with
+Bootgly's own `TCP_Client_CLI` benchmark worker, opens `/db-sleep`
+(`SELECT pg_sleep(...)`), confirms the query is active through `pg_stat_activity`,
+then requests `/fast`. The probe passes only when `/fast` responds quickly while
+PostgreSQL is still sleeping.
 
 ### Requirements
 
@@ -410,226 +559,147 @@ PASS: database wait did not block the single HTTP worker.
 
 ---
 
-## 🧪 TechEmpower-Style Database Benchmark
+## ⚠️ Environment Notes
 
-The competitive database benchmark now follows the TechEmpower database surface: `/db`, `/query?queries=N`, `/fortunes`, and `/updates?queries=N`. These scenarios are neutral across competitors and run against Bootgly and the standalone `Swoole Database` competitor.
-
-The older `SELECT 1`, parameterized query, multi-query, and `pg_sleep` routes remain available as Bootgly microbenchmarks. They are useful for isolating DBAL/resource overhead, but they are not the primary cross-framework comparison.
-
-Preliminary local results are recorded in [`RESULTS.md`](RESULTS.md).
-
-Run from the `bootgly` repository:
-
-```bash
-BOOTGLY_HTTP_SERVER_CLI_ROUTER=database \
-BOOTGLY_HTTP_SERVER_CLI_SCENARIOS=database \
-DB_HOST=127.0.0.1 \
-DB_PORT=5432 \
-DB_NAME=bootgly \
-DB_USER=postgres \
-DB_PASS= \
-DB_SSLMODE=disable \
-DB_SSLVERIFY=false \
-DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --scenarios=1,2,3,4
-```
-
-Compare Bootgly with Swoole's standalone PostgreSQL competitor:
-
-```bash
-BOOTGLY_HTTP_SERVER_CLI_ROUTER=database \
-BOOTGLY_HTTP_SERVER_CLI_SCENARIOS=database \
-DB_HOST=127.0.0.1 \
-DB_PORT=5432 \
-DB_NAME=bootgly \
-DB_USER=postgres \
-DB_PASS= \
-DB_SSLMODE=disable \
-DB_SSLVERIFY=false \
-DB_POOL_MAX=3 \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-database --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --scenarios=1,2,3,4
-```
-
-The Swoole Database competitor requires PHP extensions `swoole` and `pdo_pgsql` (`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
-
-Local tuning notes from WSL2/Ryzen 9 3900X/PostgreSQL `max_connections=100`:
-
-- `DB_POOL_MAX=1` per HTTP worker was fastest for short microbenchmarks.
-- On a single machine running client, server, and PostgreSQL together, `--server-workers=24` and `--client-workers=4` is the best balanced full-suite default observed so far.
-- `--server-workers=28` and `--client-workers=5` favored peak ping/parameter throughput, while 24/4 left more CPU headroom for pool-heavy scenarios.
-- For Swoole comparison, `DB_POOL_MAX=1` is the strict single-connection-per-worker control. `DB_POOL_MAX=3` is the recommended comparison setting; `DB_POOL_MAX=4` uses 96 database connections at 24 workers and leaves little PostgreSQL headroom while producing similar results.
-- Older `126k..130k req/s` artifacts did not validate HTTP status/body; the current TCP_Client preflight rejects 404/500 before timed runs.
-- `--connections=512` is a lower-latency alternative with similar throughput on this machine.
-- The `pg_sleep` scenarios are async-behavior checks, not TechEmpower scenarios.
-
-TechEmpower-style scenarios:
-
-| Route | Purpose |
-|-------|---------|
-| `/db` | Fetch one random `World` row |
-| `/query?queries=20` | Fetch 20 random `World` rows |
-| `/fortunes` | Fetch, append, sort, escape, and render `Fortune` rows |
-| `/updates?queries=20` | Fetch and update 20 random `World` rows |
-
-Bootgly microbenchmark pairs:
-
-| Micro route | Resource route | Purpose |
-|--------------|--------------|---------|
-| `/database/native/ping` | `/database/resource/ping` | `SELECT 1` helper overhead |
-| `/database/native/parameters` | `/database/resource/parameters` | parameterized query overhead |
-| `/database/native/pool` | `/database/resource/pool` | pool/concurrent operations overhead |
-| `/database/native/sleep` | `/database/resource/sleep` | slow async query overhead |
-
-The legacy `/database/runner/*` routes remain available as aliases for older commands, but new scenarios target `/database/resource/*`.
-
-For cross-framework comparison, use scenarios `1,2,3,4`. `Response\Resources\Database` scenarios remain Bootgly-specific.
+- **CPU balance**: both the load generator and the server share CPU. The default uses `nproc / 2` workers to leave cores for the load generator.
+- **TCP_Client runner**: uses Bootgly's built-in TCP client — no external tooling required. Loads are PHP scripts under `loads/techempower/` or `loads/benchmark/`.
+- **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). The runner uses `curl` polling as fallback.
+- **Localhost loopback**: all tests run on `127.0.0.1` — network latency is not a factor.
+- **Swoole extension**: must be compiled with CLI support. Verify with `php -m | grep swoole`.
+- **Hyperf**: requires Swoole with `swoole.use_shortname=Off`. Add to `php.ini` before running.
+- **Result variance**: results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
+- **Warmup**: a warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.
 
 ---
 
-## 📐 Multi-dimensional Vary (`--vary`)
-
-The `--vary` option runs the benchmark across a **cartesian product** of parameter values, producing one round per combination.
-
-### Syntax
-
-```bash
---vary=key1:value1,key2:value2,...
-```
-
-### Available dimensions
-
-| Key | Runner | Description |
-|-----|--------|-------------|
-| `server-workers` | Both | Number of server worker processes |
-| `connections` | TCP_Client | Number of TCP connections |
-| `client-workers` | TCP_Client | Number of client worker processes |
-| `threads` | WRK | Number of wrk threads |
-
-### Examples
-
-```bash
-# 2D: vary server workers and connections (TCP_Client)
-./bootgly test benchmark HTTP_Server_CLI \
-   --vary=server-workers:4,connections:256
-
-# 3D: full cartesian product (TCP_Client)
-./bootgly test benchmark HTTP_Server_CLI \
-   --vary=server-workers:4,connections:256,client-workers:8
-
-# 2D: vary server workers and threads (WRK)
-./bootgly test benchmark HTTP_Server_CLI --runner=wrk \
-   --vary=server-workers:4,threads:8
-```
-
-Round headers show only the dimensions that are actually varying (e.g. `4sw/256c` instead of `4sw/256c/0cw`).
-
----
-
-## 💡 Contextual Help
-
-The benchmark CLI provides a two-tier help system:
-
-### Tier 1 — List available cases
-
-```bash
-./bootgly test benchmark --help
-```
-
-Shows all discovered benchmark cases.
-
-### Tier 2 — Case-specific options
-
-```bash
-./bootgly test benchmark HTTP_Server_CLI --help
-```
-
-Shows:
-- Case configuration (from `@.php`)
-- Runner-specific options (from the selected runner's `options()` method)
-- Case-local options (from `options.php`, e.g. `--server-workers`)
-
----
-
-## 📊 Understanding Results
+## 📊 Results
 
 ### Terminal output
 
-The runner prints a **pairwise comparison table** for each competitor against Bootgly (baseline):
+Single competitor — one table, one row per load:
 
 ```
-  Bootgly vs Workerman
-
-  │ Scenario         │ Bootgly    │ Workerman  │   Diff │ B. Latency │ C. Latency │
-  │ 1 static route   │    210,000 │    195,000 │  +7.7% │     4.75ms │     5.12ms │
-  │ 10 static routes │    185,000 │    172,000 │  +7.6% │     5.40ms │     5.80ms │
-  ...
+  Bootgly
+  Load                Metric              Latency         Transfer
+  Plaintext           133,625 req/s       790.83us        16.82MB/s
+  JSON                131,458 req/s       803.32us        19.06MB/s
 ```
 
-- **Diff** = `((Bootgly - Competitor) / Competitor) × 100` — positive means Bootgly is faster
-- **Latency** = average response time
+Multiple competitors — one block per load, each competitor compared to the Bootgly
+baseline:
 
-### Saved results
+```
+  Bootgly vs Swoole TechEmpower
 
-Results are saved to:
+  ── Plaintext ──
+  Competitor          Metric              Latency         Transfer        vs Bootgly
+  Bootgly             147,163 req/s       708.04us        18.53MB/s       baseline
+  Swoole TechEmpower  115,110 req/s       925.85us        18.33MB/s       -21.8%
+```
+
+- **vs Bootgly** = `((Bootgly − Competitor) / Competitor) × 100` — a negative value means the competitor is slower than Bootgly.
+- **Latency** = average response time.
+
+### Saved marks
+
+Each run saves a plain-text `.bench.marks` file (easy to diff or archive) — the
+input to the chart tooling:
+
 ```
 bootgly/workdata/tests/benchmarks/HTTP_Server_CLI/<timestamp>_bench.marks
 ```
 
-Plain text format, easy to diff or archive.
+### Reports
 
----
+Reports are **auto-generated** from a range of `.bench.marks` files by
+`bootgly_benchmarks/scripts/chart.py` into this case's `results/` folder:
 
-## 🔌 Adding a New Competitor
-
-### 1. Create the competitor script
-
-Create `competitors/myserver.php` — this script starts the HTTP server and blocks until killed:
-
-```php
-<?php
-// Start your server on $port with $workers processes
-// The runner will call this script as a subprocess
-// and kill it when done.
+```
+results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.md
+results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.throughput.png
+results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.ratio.png
 ```
 
-See existing scripts in `competitors/` for the exact pattern (start server, listen on `getenv('PORT')`, use `getenv('WORKERS')` for worker count).
+Each report carries an environment block (auto-detected OS, CPU, PHP, Swoole), a
+reproduction command, throughput/ratio charts, per-load comparison tables, and a
+peaks summary.
 
-### 2. Create the server artifact
-
-Create `artifacts/myserver/` with the full route implementation:
-- 100 static routes + 100 dynamic routes + 6 nested + 3 middleware + catch-all
-- See any existing artifact directory for the route specification
-
-### 3. Register in `@.php`
-
-Add a `Competitor` entry to `@.php`:
-
-```php
-$Runner->add(new Competitor(
-   name: 'MyServer',
-   version: fn () => 'v1.0.0',
-   script: __DIR__ . '/competitors/myserver.php',
-));
-```
-
-The `name` parameter is used as the CLI filter value (lowercased): `--competitors=myserver`.
-
-### 4. Run
+#### 1. One-time setup
 
 ```bash
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,myserver
+cd bootgly_benchmarks/scripts
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
----
+Requires Python ≥ 3.10 and matplotlib. The venv only has to be built once.
 
-## ⚠️ Environment Notes
+#### 2. Run a sweep
 
-- **CPU balance**: Both the load generator and the server share CPU. The default uses `nproc / 2` workers to leave cores for the load generator.
-- **TCP_Client runner**: Uses Bootgly's built-in TCP client — no external tooling required. Scenarios are PHP scripts under `scenarios/php/`.
-- **WRK runner**: Requires the `wrk` binary installed. Scenarios are Lua scripts under `scenarios/`.
-- **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). The runner uses `curl` polling as fallback.
-- **Localhost loopback**: All tests run on `127.0.0.1` — network latency is not a factor.
-- **Swoole extension**: Must be compiled with CLI support. Verify with `php -m | grep swoole`.
-- **Hyperf**: Requires Swoole with `swoole.use_shortname=Off`. Add to `php.ini` before running.
-- **Result variance**: Results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
-- **Warmup**: A warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.
+The X axis is the config key that varies between input files (normally
+`server-workers`), so charts need a **sweep** — at least two runs differing in one
+parameter. Run from the **bootgly** directory.
+
+TechEmpower set, Bootgly vs Swoole, all six routes:
+
+```bash
+cd bootgly
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
+       DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
+for sw in 1 2 4 8 12 24; do
+   BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+   BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
+   php bootgly test benchmark HTTP_Server_CLI \
+      --competitors=bootgly,swoole-techempower --runner=tcp_client \
+      --connections=512 --duration=10 --server-workers="$sw" --loads=1,2,3,4,5,6
+done
+```
+
+Bootgly-internal set (no competitors), e.g. just the DB probes:
+
+```bash
+cd bootgly
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
+       DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
+for sw in 1 2 4 8 12 24; do
+   BOOTGLY_HTTP_SERVER_CLI_ROUTER=bootgly \
+   BOOTGLY_HTTP_SERVER_CLI_LOADS=benchmark \
+   php bootgly test benchmark HTTP_Server_CLI \
+      --competitors=bootgly --runner=tcp_client \
+      --connections=512 --duration=10 --server-workers="$sw" --loads=13,14,15,16,17,18,19,20
+done
+```
+
+> A single-parameter sweep can also be produced in one command with
+> [`--vary`](#-configuration), e.g. `--vary=server-workers:1,server-workers:2,...`.
+> The `for` loop above is the explicit equivalent.
+
+#### 3. Generate the charts
+
+Point `--marks` at a glob covering **every** `.marks` file from the sweep, and
+`--out` at this case's `results/` directory:
+
+```bash
+cd bootgly_benchmarks/scripts
+.venv/bin/python3 chart.py \
+   --marks '../../bootgly/workdata/tests/benchmarks/HTTP_Server_CLI/2026-06-04_*_bench.marks' \
+   --out ../HTTP_Server_CLI/results/ \
+   --baseline Bootgly
+```
+
+#### Tips & gotchas
+
+- **The glob must match every file in the sweep.** A pattern like `2026-06-04_193*`
+  silently drops `19:34:xx` runs — prefer `2026-06-04_19*` or `2026-06-04_*`.
+  `chart.py` aborts with *"No config key varies"* when the glob resolves to a single
+  file (nothing to put on the X axis).
+- **Subplots follow `--loads`.** The chart draws one subplot per load present in the
+  marks, so the `--loads` you ran during the sweep decide which subplots appear.
+- **X axis is auto-detected** (the config key with the most distinct values). Force
+  it with `--x-key server-workers` if several keys vary.
+- **Baseline** defaults to the first competitor alphabetically; pass
+  `--baseline Bootgly` to pin it (drives the ratio chart and `Δ` columns).
+- **Filenames** use the marks `# Config: load-set` key (`techempower` or
+  `benchmark`), so the two sets never overwrite each other.
+
+See [`scripts/README.md`](../scripts/README.md) for the full `chart.py` CLI reference.

@@ -4,7 +4,7 @@
  * Bootgly Benchmarks — TCP_Raw Runner
  * --------------------------------------------------------------------------
  * Raw TCP benchmark runner using Bootgly TCP_Client_CLI as load generator.
- * Sends raw messages (defined by scenario) and counts responses by delimiter.
+ * Sends raw messages (defined by load) and counts responses by delimiter.
  * --------------------------------------------------------------------------
  */
 
@@ -13,8 +13,8 @@ use Bootgly\ACI\Tests\Benchmark\Competitor;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
-use Bootgly\ACI\Tests\Benchmark\Configs\Scenario;
-use Bootgly\ACI\Tests\Benchmark\Configs\Scenarios;
+use Bootgly\ACI\Tests\Benchmark\Configs\Load;
+use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
 
 
 return new class (
@@ -79,11 +79,11 @@ return new class (
    }
 
    /**
-    * Load scenarios from a directory of .php files.
+    * Load loads from a directory of .php files.
     */
-   public function load (string $scenariosDir): void
+   public function load (string $loadsDir): void
    {
-      $this->scenarios = Scenarios::loadPhp($scenariosDir);
+      $this->loads = Loads::loadPhp($loadsDir);
    }
 
    /**
@@ -171,15 +171,15 @@ return new class (
          exit(130);
       });
 
-      // @ Pre-filter scenarios for counting
-      $filteredScenarios = [];
-      foreach ($this->scenarios as $index => $Scenario) {
-         if ($Configs->scenarios !== null && !in_array($index + 1, $Configs->scenarios)) {
+      // @ Pre-filter loads for counting
+      $filteredLoads = [];
+      foreach ($this->loads as $index => $Load) {
+         if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
             continue;
          }
-         $filteredScenarios[$index] = $Scenario;
+         $filteredLoads[$index] = $Load;
       }
-      $totalScenarios = count($filteredScenarios);
+      $totalLoads = count($filteredLoads);
 
       foreach ($this->competitors as $Competitor) {
          // ? Filter
@@ -245,31 +245,31 @@ return new class (
             $this->warmup();
             sleep(2);
 
-            // @ Run scenarios
-            $scenarioNum = 0;
+            // @ Run loads
+            $loadNum = 0;
             $prevGroup = '';
 
-            foreach ($this->scenarios as $index => $Scenario) {
-               if ($Configs->scenarios !== null && !in_array($index + 1, $Configs->scenarios)) {
+            foreach ($this->loads as $index => $Load) {
+               if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
                   continue;
                }
 
                if (
-                  $Scenario->competitors !== 'all'
-                  && !in_array($Competitor->name, explode(',', $Scenario->competitors))
+                  $Load->competitors !== 'all'
+                  && !in_array($Competitor->name, explode(',', $Load->competitors))
                ) {
                   continue;
                }
 
                // @ Group header
-               if ($Scenario->group !== '' && $Scenario->group !== $prevGroup) {
-                  echo "    {$BOLD}{$Scenario->group}{$RESET}\n";
-                  $prevGroup = $Scenario->group;
+               if ($Load->group !== '' && $Load->group !== $prevGroup) {
+                  echo "    {$BOLD}{$Load->group}{$RESET}\n";
+                  $prevGroup = $Load->group;
                }
 
-               $scenarioNum++;
+               $loadNum++;
 
-               $Result = $this->command($Scenario, $roundConnections, $roundClientWorkers);
+               $Result = $this->command($Load, $roundConnections, $roundClientWorkers);
 
                // @ Real-time result
                $rps = $Result->rps !== null
@@ -282,10 +282,10 @@ return new class (
                   ? "  {$DIM}({$Result->latency}){$RESET}"
                   : '';
 
-               echo "    {$DIM}[{$scenarioNum}/{$totalScenarios}]{$RESET} {$Scenario->label}...  {$rps}{$transfer}{$latency}\n";
+               echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}\n";
 
-               // @ Keep best per scenario
-               $label = $Scenario->label;
+               // @ Keep best per load
+               $label = $Load->label;
                if (
                   !isset($bestResults[$label])
                   || ($Result->rps !== null && ($bestResults[$label]->rps === null || $Result->rps > $bestResults[$label]->rps))
@@ -404,7 +404,7 @@ return new class (
          . " --port={$this->port}"
          . " --connections={$this->warmupConnections}"
          . " --duration={$this->warmupDuration}"
-         . " --scenario-file={$tmpFile}"
+         . " --load-file={$tmpFile}"
          . " --workers={$this->resolveClientWorkers()}"
          . " > /dev/null 2>&1"
       );
@@ -412,22 +412,22 @@ return new class (
       @unlink($tmpFile);
    }
 
-   private function command (Scenario $Scenario, int $connections = 0, int $clientWorkers = 0): Result
+   private function command (Load $Load, int $connections = 0, int $clientWorkers = 0): Result
    {
       $workerScript = __DIR__ . '/TCP_Raw/worker.php';
       $connections = $connections > 0 ? $connections : $this->connections;
       $clientWorkers = $clientWorkers > 0 ? $clientWorkers : $this->resolveClientWorkers();
 
-      // @ Load scenario data from PHP file
-      $scenarioData = include $Scenario->file;
+      // @ Load load data from PHP file
+      $loadData = include $Load->file;
 
-      // @ Write scenario to temp file
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_scenario_');
+      // @ Write load to temp file
+      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_load_');
       if ($tmpFile === false) {
          return new Result();
       }
 
-      file_put_contents($tmpFile, json_encode($scenarioData));
+      file_put_contents($tmpFile, json_encode($loadData));
 
       // @ Run worker subprocess
       $output = [];
@@ -436,7 +436,7 @@ return new class (
          . " --port={$this->port}"
          . " --connections={$connections}"
          . " --duration={$this->duration}"
-         . " --scenario-file={$tmpFile}"
+         . " --load-file={$tmpFile}"
          . " --workers={$clientWorkers}"
          . " 2>/dev/null";
 

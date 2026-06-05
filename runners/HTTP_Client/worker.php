@@ -4,7 +4,7 @@
  * Bootgly PHP Framework — Benchmark Worker
  * --------------------------------------------------------------------------
  * Standalone subprocess that generates HTTP load using HTTP_Client_CLI.
- * Spawned by http_client runner per scenario.
+ * Spawned by http_client runner per load.
  *
  * Usage:
  *   php worker.php --host=127.0.0.1 --port=8082 --connections=514
@@ -76,7 +76,7 @@ if ($pathsFile === '' || !\file_exists($pathsFile)) {
 
 
 // ---------------------------------------------------------------------------
-// Load scenario data
+// Load load data
 // ---------------------------------------------------------------------------
 $json = file_get_contents($pathsFile);
 if ($json === false) {
@@ -91,15 +91,15 @@ if (
    || !\is_array($decoded['paths'])
    || $decoded['paths'] === []
 ) {
-   \fwrite(\STDERR, "ERROR: Invalid scenario data.\n");
+   \fwrite(\STDERR, "ERROR: Invalid load data.\n");
    exit(1);
 }
 
-/** @var array{method: string, paths: array<string>} $scenario */
-$scenario = $decoded;
+/** @var array{method: string, paths: array<string>} $load */
+$load = $decoded;
 
-$method    = $scenario['method'];
-$paths     = $scenario['paths'];
+$method    = $load['method'];
+$paths     = $load['paths'];
 $pathCount = count($paths);
 
 
@@ -132,7 +132,7 @@ Logger::$display = Logger::DISPLAY_NONE;
 // Worker function: runs a single-process HTTP Client benchmark
 // ---------------------------------------------------------------------------
 /**
- * @param array<string> $paths Scenario paths.
+ * @param array<string> $paths Load paths.
  */
 function runWorker (
    string $host, int $port, int $workerConnections, int $duration,

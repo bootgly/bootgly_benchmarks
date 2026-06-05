@@ -17,7 +17,7 @@ Benchmarks | Interface | Result
 --- | --- | ---
 [Progress Bar][BENCHMARK_01] | CLI | ≈ 7x faster than Laravel / Symfony Progress Bar to render 250k iterations
 [Template Engine - foreach][BENCHMARK_02] | ABI | ≈ 9x faster than Laravel Blade (without sacrificing features)
-[HTTP Server CLI (Router)][BENCHMARK_03] | WPI | Router benchmark: 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all vs 8 competitors
+[HTTP Server CLI][BENCHMARK_03] | WPI | TechEmpower benchmark: 6 canonical routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`) vs opponents
 
 <!-- Links -->
 [BENCHMARK_01]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Progress_Bar/README.md

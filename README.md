@@ -75,7 +75,7 @@ Available cases:
 The benchmark framework lives in `bootgly/Bootgly/ACI/Tests/Benchmark/` and provides:
 
 - **Configs** — parsed CLI options (`--competitors`, `--runner`, `--loads`, `--vary`)
-- **Competitor** — a named entry (with version and script path) to benchmark against
+- **Opponents** — a named entry (with version and script path) to benchmark against
 - **Runner** — abstract executor that drives each benchmark. Built-in runners:
   | Runner | CLI Name | Use Case |
   |--------|----------|----------|

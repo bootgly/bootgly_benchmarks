@@ -8,7 +8,7 @@ use Swoole\Http\Response;
 use Swoole\Http\Server;
 
 if (extension_loaded('swoole') === false || extension_loaded('pdo_pgsql') === false) {
-   fwrite(STDERR, "Swoole Database competitor requires swoole and pdo_pgsql extensions.\n");
+   fwrite(STDERR, "Swoole Database opponent requires swoole and pdo_pgsql extensions.\n");
    exit(1);
 }
 

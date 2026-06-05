@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Template_Engine — Bootgly Competitor
+ * Bootgly Benchmarks — Template_Engine — Bootgly Opponent
  * --------------------------------------------------------------------------
  *
  * Tests foreach directive with 1,000,000 items using Bootgly Template Engine.

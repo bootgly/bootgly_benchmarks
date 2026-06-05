@@ -1,16 +1,16 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Template_Engine — Bootgly Competitor
+ * Bootgly Benchmarks — Template_Engine — Bootgly Opponent
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 
 
 /** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
 
-$Runner->add(new Competitor(
+$Runner->add(new Opponent(
    name: 'Bootgly',
    version: fn () => 'v' . BOOTGLY_VERSION,
    script: __DIR__ . '/bootgly.php',

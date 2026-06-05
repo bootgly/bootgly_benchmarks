@@ -1,7 +1,7 @@
 <?php
 // @label: Database multiple queries
 // @group: TechEmpower
-// @competitors: all
+// @opponents: all
 // TechEmpower-style /query?queries=20: pipeline 20 random World fetches.
 
 return [

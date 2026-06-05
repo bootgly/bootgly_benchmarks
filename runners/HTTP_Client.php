@@ -8,7 +8,7 @@
  */
 
 use Bootgly\ABI\Data\__String\Escapeable\Text\Formattable;
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
@@ -63,8 +63,8 @@ return new class (
       }
       if (isset($options['server-workers'])) {
          $serverWorkers = (int) $options['server-workers'];
-         foreach ($this->competitors as $Competitor) {
-            $Competitor->workers = $serverWorkers;
+         foreach ($this->opponents as $Opponent) {
+            $Opponent->workers = $serverWorkers;
          }
       }
    }
@@ -107,7 +107,7 @@ return new class (
 
       // # Configuration
       $defaultWorkers = max(1, (int) ((int)(exec('nproc 2>/dev/null') ?: 1) / 2));
-      $baseWorkers = $this->competitors[0]->workers ?? $defaultWorkers;
+      $baseWorkers = $this->opponents[0]->workers ?? $defaultWorkers;
       $workersStep = $Configs->vary['server-workers'] ?? 0;
       $connectionsStep = $Configs->vary['connections'] ?? 0;
       $clientWorkersStep = $Configs->vary['client-workers'] ?? 0;
@@ -162,11 +162,11 @@ return new class (
       $rounds = $this->computeRounds($Configs->vary);
 
       // @ Install SIGINT handler to stop server on CTRL+C
-      $activeCompetitor = null;
+      $activeOpponent = null;
       pcntl_async_signals(true);
-      pcntl_signal(SIGINT, function () use (&$activeCompetitor) {
-         if ($activeCompetitor !== null) {
-            $this->stopServer($activeCompetitor);
+      pcntl_signal(SIGINT, function () use (&$activeOpponent) {
+         if ($activeOpponent !== null) {
+            $this->stopServer($activeOpponent);
          }
          exit(130);
       });
@@ -181,9 +181,9 @@ return new class (
       }
       $totalLoads = count($filteredLoads);
 
-      foreach ($this->competitors as $Competitor) {
+      foreach ($this->opponents as $Opponent) {
          // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
-         if ($Configs->competitors !== null && !in_array(Configs::slug($Competitor->name), array_map(Configs::slug(...), $Configs->competitors))) {
+         if ($Configs->opponents !== null && !in_array(Configs::slug($Opponent->name), array_map(Configs::slug(...), $Configs->opponents))) {
             continue;
          }
 
@@ -206,7 +206,7 @@ return new class (
                )),
                $rounds
             ));
-            echo "  {$BOLD}{$BLUE}▸ {$Competitor->name}: {$roundCount} rounds ({$details}){$RESET}\n\n";
+            echo "  {$BOLD}{$BLUE}▸ {$Opponent->name}: {$roundCount} rounds ({$details}){$RESET}\n\n";
          }
 
          foreach ($rounds as $roundIndex => $round) {
@@ -230,18 +230,18 @@ return new class (
             $this->killPort();
 
             // @ Start server
-            $activeCompetitor = $Competitor;
-            echo "  {$BOLD}{$BLUE}▸ Starting {$Competitor->name}...{$RESET}\n";
-            $this->startServer($Competitor, $roundWorkers);
+            $activeOpponent = $Opponent;
+            echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
+            $this->startServer($Opponent, $roundWorkers);
 
             // @ Wait for server readiness
             if ( !$this->waitForServer() ) {
-               echo "    {$RED}{$Competitor->name} failed to start!{$RESET}\n\n";
-               $this->stopServer($Competitor);
+               echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n\n";
+               $this->stopServer($Opponent);
                continue;
             }
 
-            echo "    {$GREEN}{$Competitor->name} ready (port {$this->port}).{$RESET}\n";
+            echo "    {$GREEN}{$Opponent->name} ready (port {$this->port}).{$RESET}\n";
 
             // @ Warmup
             echo "    {$DIM}Warming up ({$this->warmupDuration}s)...{$RESET}\n";
@@ -259,10 +259,10 @@ return new class (
                   continue;
                }
 
-               // ? Skip if load restricts competitors
+               // ? Skip if load restricts opponents
                if (
-                  $Load->competitors !== 'all'
-                  && !in_array($Competitor->name, explode(',', $Load->competitors))
+                  $Load->opponents !== 'all'
+                  && !in_array($Opponent->name, explode(',', $Load->opponents))
                ) {
                   continue;
                }
@@ -303,11 +303,11 @@ return new class (
             echo "\n";
 
             // @ Stop server
-            $this->stopServer($Competitor);
-            $activeCompetitor = null;
+            $this->stopServer($Opponent);
+            $activeOpponent = null;
          }
 
-         $results[$Competitor->name] = $bestResults;
+         $results[$Opponent->name] = $bestResults;
       }
 
       return $results;
@@ -319,15 +319,15 @@ return new class (
       exec("lsof -ti :{$this->port} 2>/dev/null | xargs kill -9 2>/dev/null");
       usleep(500_000);
    }
-   private function startServer (Competitor $Competitor, int $workers): void
+   private function startServer (Opponent $Opponent, int $workers): void
    {
-      $script = $Competitor->script;
+      $script = $Opponent->script;
       putenv("BOOTGLY_WORKERS={$workers}");
       exec("BOOTGLY_WORKERS={$workers} php {$script} start > /dev/null 2>&1 &");
    }
-   private function stopServer (Competitor $Competitor): void
+   private function stopServer (Opponent $Opponent): void
    {
-      $script = $Competitor->script;
+      $script = $Opponent->script;
       exec("php {$script} stop > /dev/null 2>&1");
 
       sleep(1);
@@ -361,7 +361,7 @@ return new class (
    private function computeRounds (array $vary): array
    {
       $nproc = (int) (exec('nproc 2>/dev/null') ?: 1);
-      $baseWorkers = $this->competitors[0]->workers ?? max(1, (int) ($nproc / 2));
+      $baseWorkers = $this->opponents[0]->workers ?? max(1, (int) ($nproc / 2));
       $baseConnections = $this->connections;
       $baseClientWorkers = $this->resolveClientWorkers();
 

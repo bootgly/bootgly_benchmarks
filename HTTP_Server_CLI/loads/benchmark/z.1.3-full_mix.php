@@ -1,7 +1,7 @@
 <?php
 // @label: Full mix (all types)
 // @group: Mixed workloads
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Realistic workload: static + dynamic + nested + middleware + catch-all.
 
 $paths = [];

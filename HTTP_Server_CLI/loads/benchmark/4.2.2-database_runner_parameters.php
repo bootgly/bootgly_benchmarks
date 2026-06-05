@@ -1,7 +1,7 @@
 <?php
 // @label: Database resource parameterized
 // @group: Database Bootgly resources
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Response resource ADI PostgreSQL parameterized query.
 
 return [

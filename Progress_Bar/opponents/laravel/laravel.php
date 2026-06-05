@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Progress_Bar — Laravel/Symfony Competitor
+ * Bootgly Benchmarks — Progress_Bar — Laravel/Symfony Opponent
  * --------------------------------------------------------------------------
  *
  * Renders 5000 Progress Bar iterations using Symfony ProgressBar (via Laravel).

@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — RoadRunner Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — RoadRunner Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop RoadRunner for benchmarking.

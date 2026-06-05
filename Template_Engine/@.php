@@ -10,7 +10,7 @@
 $Runner = include __DIR__ . '/../runners/Code.php';
 $Runner->iterations = 1;
 
-// @ Auto-register competitors — each folder self-registers via its own @.php
+// @ Auto-register opponents — each folder self-registers via its own @.php
 foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
    require $opponentFile;
 }

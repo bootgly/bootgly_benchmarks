@@ -1,14 +1,14 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks - HTTP_Server_CLI - Swoole TechEmpower Competitor
+ * Bootgly Benchmarks - HTTP_Server_CLI - Swoole TechEmpower Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop Swoole HTTP Server serving the six canonical TechEmpower routes:
  *   /plaintext, /json, /db, /query, /fortunes, /updates
  *
  * Backed by the native PDO PostgreSQL pool — same topology as the Swoole
- * Database competitor, plus the two static `/plaintext` and `/json` routes
+ * Database opponent, plus the two static `/plaintext` and `/json` routes
  * required by the TechEmpower load set.
  *
  * Usage:

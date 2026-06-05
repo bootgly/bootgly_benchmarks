@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Template_Engine — Laravel/Blade Competitor
+ * Bootgly Benchmarks — Template_Engine — Laravel/Blade Opponent
  * --------------------------------------------------------------------------
  *
  * Tests foreach directive with 1,000,000 items using Laravel Blade.

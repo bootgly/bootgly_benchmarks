@@ -6,7 +6,7 @@
  * The master handles connections and dispatches to workers.
  * This is Swoole's default and most common server mode.
  *
- * Same route set as all benchmark competitors:
+ * Same route set as all benchmark opponents:
  * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * Usage: php swoole-process-routes.php

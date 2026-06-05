@@ -1,7 +1,7 @@
 <?php
 // @label: Database resource sleep
 // @group: Database async probe
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Response resource ADI PostgreSQL slow query with event-loop wait.
 
 return [

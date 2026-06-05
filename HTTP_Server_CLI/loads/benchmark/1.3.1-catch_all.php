@@ -1,7 +1,7 @@
 <?php
 // @label: Catch-all 404
 // @group: Catch-all
-// @competitors: Bootgly
+// @opponents: Bootgly
 // All requests hit non-existent paths, triggering the catch-all handler.
 
 return [

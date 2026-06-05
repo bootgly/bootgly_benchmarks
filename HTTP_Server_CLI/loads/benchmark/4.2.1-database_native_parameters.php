@@ -1,7 +1,7 @@
 <?php
 // @label: Database micro parameterized
 // @group: Database microbenchmarks
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Low-level ADI PostgreSQL parameterized query.
 
 return [

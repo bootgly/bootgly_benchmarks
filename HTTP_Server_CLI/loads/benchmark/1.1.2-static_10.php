@@ -1,7 +1,7 @@
 <?php
 // @label: 10 static routes
 // @group: Static routes
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Round-robins through all 10 registered static routes.
 
 return [

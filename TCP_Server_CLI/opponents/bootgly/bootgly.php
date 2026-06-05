@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — TCP_Server_CLI — Bootgly Competitor
+ * Bootgly Benchmarks — TCP_Server_CLI — Bootgly Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop the Bootgly TCP Server for benchmarking.

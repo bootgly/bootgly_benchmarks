@@ -1,7 +1,7 @@
 <?php
 // @label: Database resource multi-query
 // @group: Database Bootgly resources
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Response resource ADI PostgreSQL pool/concurrent operations.
 
 return [

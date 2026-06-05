@@ -2,11 +2,11 @@
 /**
  * Hyperf benchmark routes.
  *
- * Same route set as all benchmark competitors:
+ * Same route set as all benchmark opponents:
  * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * All routes return plain text responses matching the exact format
- * of other competitors. No views, no JSON — just text/plain.
+ * of other opponents. No views, no JSON — just text/plain.
  */
 
 declare(strict_types=1);
@@ -93,7 +93,7 @@ Router::get('/account/security', function () {
    return 'Account Security';
 });
 
-// --- Middleware routes (3) — no actual middleware for non-Bootgly competitors ---
+// --- Middleware routes (3) — no actual middleware for non-Bootgly opponents ---
 Router::get('/protected/dashboard', function () {
    return 'Protected Dashboard';
 });

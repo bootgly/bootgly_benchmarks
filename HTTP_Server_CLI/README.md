@@ -2,7 +2,7 @@
 
 Benchmarks for **Bootgly HTTP Server CLI**, split into two **load sets**:
 
-- **`techempower`** — the six canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more competitors in Phase 2).
+- **`techempower`** — the six canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more opponents in Phase 2).
 - **`benchmark`** — a Bootgly-internal stress surface (100 static, 100 dynamic, nested groups, per-route middleware, catch-all, plus DB probes) for **self-comparison during framework development**. Bootgly-only.
 
 Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching router with `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>`.
@@ -15,7 +15,7 @@ Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching route
 - [Installation](#-installation)
 - [Loads](#-loads)
 - [Runners](#-runners)
-- [Competitors](#-competitors)
+- [Opponents](#-opponents)
 - [Configuration](#-configuration)
 - [Running Benchmarks](#-running-benchmarks)
 - [Probes](#-probes)
@@ -35,8 +35,8 @@ Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching route
 | **nproc** | CPU count detection | ✅ |
 | **PostgreSQL** | DB loads (`/db`, `/query`, `/fortunes`, `/updates`) + Probes | Only for DB loads |
 | **psql** | Seeds the TechEmpower tables + Probe control query | Only for DB loads |
-| **Swoole extension** + `pdo_pgsql` | `swoole-techempower` competitor | Only for cross-framework |
-| **FrankenPHP binary** | Phase 2 competitors | Optional |
+| **Swoole extension** + `pdo_pgsql` | `swoole-techempower` opponent | Only for cross-framework |
+| **FrankenPHP binary** | Phase 2 opponents | Optional |
 
 ---
 
@@ -45,12 +45,12 @@ Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching route
 > `bootgly` and `bootgly_benchmarks` sit **side by side** in the same parent
 > directory — the runner resolves the framework via that relative layout.
 
-### 1. Install competitor dependencies
+### 1. Install opponent dependencies
 
 > The current cross-framework run (`techempower` set) only needs **Bootgly** and
 > **Swoole TechEmpower** (Swoole + `pdo_pgsql`). The servers below —
 > RoadRunner, Workerman, Hyperf, FrankenPHP — are for the **Phase 2**
-> competitors; install them only when their TechEmpower variants land.
+> opponents; install them only when their TechEmpower variants land.
 
 ```bash
 cd bootgly_benchmarks/HTTP_Server_CLI/bootables
@@ -82,7 +82,7 @@ cd hyperf && composer install && cd ..
 pecl install swoole
 ```
 
-Add `extension=swoole.so` to your `php.ini`. The `swoole-techempower` competitor
+Add `extension=swoole.so` to your `php.ini`. The `swoole-techempower` opponent
 also needs `pdo_pgsql` (`php8.4-pgsql` on Debian/Ubuntu).
 
 ### 3. Install FrankenPHP (optional, Phase 2)
@@ -107,7 +107,7 @@ response) for the TCP_Client generator.
 
 ### TechEmpower set (`loads/techempower/`)
 
-Six canonical TechEmpower routes, identical across competitors. Backed by
+Six canonical TechEmpower routes, identical across opponents. Backed by
 `projects/Benchmark/HTTP_Server_CLI/router/techempower-benchmark.SAPI.php`.
 
 | # | File | Route | Description |
@@ -119,15 +119,15 @@ Six canonical TechEmpower routes, identical across competitors. Backed by
 | 5 | `1.0.5-fortunes` | `GET /fortunes` | Fortune list rendered as HTML |
 | 6 | `1.0.6-updates` | `GET /updates?queries=20` | 20 random `World` reads + batched UPDATE |
 
-All loads tagged `@competitors: all` — cross-framework fair comparison.
+All loads tagged `@opponents: all` — cross-framework fair comparison.
 
 ### Bootgly set (`loads/benchmark/`)
 
 Bootgly-internal stress surface, for self-comparison during framework
 development. Backed by
 `projects/Benchmark/HTTP_Server_CLI/router/bootgly-benchmark.SAPI.php`. Every
-load is tagged `@competitors: Bootgly`, so the runner skips cross-framework
-competitors automatically — even if you pass `--competitors=bootgly,swoole-base`.
+load is tagged `@opponents: Bootgly`, so the runner skips cross-framework
+opponents automatically — even if you pass `--opponents=bootgly,swoole-base`.
 
 | # | File | Group | Route(s) |
 |---|------|-------|----------|
@@ -152,13 +152,13 @@ competitors automatically — even if you pass `--competitors=bootgly,swoole-bas
 | 19 | `4.4.1-database_native_sleep` | DB probe | `/database/native/sleep` |
 | 20 | `4.4.2-database_runner_sleep` | DB probe | `/database/resource/sleep` |
 
-### `@competitors` tag
+### `@opponents` tag
 
-Each load file has a `@competitors:` header controlling which competitors run it:
+Each load file has a `@opponents:` header controlling which opponents run it:
 
-- `all` — every registered competitor runs the load.
-- `Bootgly` — only Bootgly runs it; other competitors are skipped even when
-  passed via `--competitors=`.
+- `all` — every registered opponent runs the load.
+- `Bootgly` — only Bootgly runs it; other opponents are skipped even when
+  passed via `--opponents=`.
 
 This keeps the cross-framework `techempower` set fair while the `benchmark` set
 stays Bootgly-only.
@@ -166,7 +166,7 @@ stays Bootgly-only.
 ### Database Benchmark
 
 The cross-framework database comparison is the `techempower` set's four DB routes
-(loads `3,4,5,6`). They are neutral across competitors and run against Bootgly and
+(loads `3,4,5,6`). They are neutral across opponents and run against Bootgly and
 **Swoole TechEmpower**:
 
 | Route | Purpose |
@@ -178,7 +178,7 @@ The cross-framework database comparison is the `techempower` set's four DB route
 
 The Bootgly `benchmark` set additionally ships `SELECT 1`, parameterized,
 multi-query, and `pg_sleep` probes (loads `13–20`). They isolate DBAL/resource
-overhead but are Bootgly-only (`@competitors: Bootgly`), not a cross-framework
+overhead but are Bootgly-only (`@opponents: Bootgly`), not a cross-framework
 comparison:
 
 | Native route | Resource route | Purpose |
@@ -203,10 +203,10 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
 ```
 
-Compare Bootgly with the Swoole TechEmpower competitor:
+Compare Bootgly with the Swoole TechEmpower opponent:
 
 ```bash
 BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
@@ -219,10 +219,10 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
 ```
 
-The Swoole TechEmpower competitor requires PHP extensions `swoole` and `pdo_pgsql`
+The Swoole TechEmpower opponent requires PHP extensions `swoole` and `pdo_pgsql`
 (`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL
 pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 
@@ -263,7 +263,7 @@ supports multi-worker forking and HTTP pipelining.
 
 ---
 
-## 🏁 Competitors
+## 🏁 Opponents
 
 | Server | Language / Runtime | Mode | Used by |
 |--------|-------------------|------|---------|
@@ -277,17 +277,17 @@ supports multi-worker forking and HTTP pipelining.
 | **FrankenPHP** | Go + PHP (worker mode) | Caddy-based | Phase 2 (pending) |
 | **Hyperf** | PHP (Swoole framework) | Full-stack coroutine | Phase 2 (pending) |
 
-All competitors use `nproc / 2` workers for fair CPU distribution.
+All opponents use `nproc / 2` workers for fair CPU distribution.
 
 The TechEmpower set currently runs Bootgly against **Swoole TechEmpower** only.
-The other competitors are still registered but serve the pre-split router routes,
+The other opponents are still registered but serve the pre-split router routes,
 not the TechEmpower routes — their `/plaintext` + `/json` + four-DB-route variants
 are **Phase 2 (pending)**. Running them against the `techempower` set today fails
 preflight (404 on `/plaintext`).
 
 ### Available names
 
-CLI filter values for `--competitors=`:
+CLI filter values for `--opponents=`:
 
 | Name | Description |
 |------|-------------|
@@ -301,11 +301,11 @@ CLI filter values for `--competitors=`:
 | `frankenphp` | FrankenPHP worker mode — Phase 2 |
 | `hyperf` | Hyperf (Swoole framework) — Phase 2 |
 
-### Adding a competitor
+### Adding an opponent
 
-#### 1. Create the competitor script
+#### 1. Create the opponent script
 
-Each competitor lives in its own folder under `opponents/` and may hold several
+Each opponent lives in its own folder under `opponents/` and may hold several
 variations (e.g. `opponents/swoole/` has `swoole-base.php`,
 `swoole-techempower.php`, …). Create `opponents/myserver/myserver.php` — it
 starts the HTTP server and blocks until killed:
@@ -321,7 +321,7 @@ listen on `getenv('PORT')`, use `getenv('WORKERS')` for worker count).
 
 #### 2. Create the server artifact
 
-Create `bootables/myserver/` serving the six TechEmpower routes so the competitor
+Create `bootables/myserver/` serving the six TechEmpower routes so the opponent
 joins the cross-framework `techempower` set:
 
 - `/plaintext`, `/json`, `/db`, `/query?queries=N`, `/fortunes`, `/updates?queries=N`
@@ -329,32 +329,32 @@ joins the cross-framework `techempower` set:
 
 #### 3. Self-register via `opponents/myserver/@.php`
 
-Each competitor folder ships an `@.php` that registers itself — the case's main
+Each opponent folder ships an `@.php` that registers itself — the case's main
 `@.php` auto-discovers them with `glob(opponents/*/@.php)`, so you never edit it.
 A folder may register several variations (see `opponents/swoole/@.php`):
 
 ```php
 <?php
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 
 /** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
 
-$Runner->add(new Competitor(
+$Runner->add(new Opponent(
    name: 'MyServer',
    version: fn () => 'v1.0.0',
    script: __DIR__ . '/myserver.php',
 ));
 ```
 
-The `name` is used as the CLI filter value (lowercased): `--competitors=myserver`.
+The `name` is used as the CLI filter value (lowercased): `--opponents=myserver`.
 
 #### 4. Run
 
 ```bash
 BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
 BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,myserver
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,myserver
 ```
 
 ---
@@ -449,25 +449,25 @@ With no env vars, the run defaults to the Bootgly-internal `benchmark` set
 
 ```bash
 # Bootgly-internal benchmark set, all loads (default, TCP_Client runner)
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly
 ```
 
 Cross-framework comparison uses the `techempower` set plus a TechEmpower
-competitor. The DB routes need PostgreSQL — export `DB_*` (see
+opponent. The DB routes need PostgreSQL — export `DB_*` (see
 [Database Benchmark](#database-benchmark)):
 
 ```bash
 # Bootgly vs Swoole TechEmpower, six TechEmpower routes
 BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
 BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly,swoole-techempower
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower
 ```
 
 ### Filtering loads
 
 ```bash
 # Run only load 1 (static single) and 8 (nested 6) of the benchmark set
-./bootgly test benchmark HTTP_Server_CLI --competitors=bootgly --loads=1,8
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=1,8
 
 # Run only the 100-route loads (3 and 6)
 ./bootgly test benchmark HTTP_Server_CLI --loads=3,6
@@ -494,7 +494,7 @@ BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
 
 | Option | Description |
 |--------|-------------|
-| `--competitors=NAME,...` | Filter competitors by name |
+| `--opponents=NAME,...` | Filter opponents by name |
 | `--loads=N,...` | Filter loads by 1-based index |
 | `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
 
@@ -576,7 +576,7 @@ PASS: database wait did not block the single HTTP worker.
 
 ### Terminal output
 
-Single competitor — one table, one row per load:
+Single opponent — one table, one row per load:
 
 ```
   Bootgly
@@ -585,19 +585,19 @@ Single competitor — one table, one row per load:
   JSON                131,458 req/s       803.32us        19.06MB/s
 ```
 
-Multiple competitors — one block per load, each competitor compared to the Bootgly
+Multiple opponents — one block per load, each opponent compared to the Bootgly
 baseline:
 
 ```
   Bootgly vs Swoole TechEmpower
 
   ── Plaintext ──
-  Competitor          Metric              Latency         Transfer        vs Bootgly
+  Opponent          Metric              Latency         Transfer        vs Bootgly
   Bootgly             147,163 req/s       708.04us        18.53MB/s       baseline
   Swoole TechEmpower  115,110 req/s       925.85us        18.33MB/s       -21.8%
 ```
 
-- **vs Bootgly** = `((Bootgly − Competitor) / Competitor) × 100` — a negative value means the competitor is slower than Bootgly.
+- **vs Bootgly** = `((Bootgly − Opponent) / Opponent) × 100` — a negative value means the opponent is slower than Bootgly.
 - **Latency** = average response time.
 
 ### Saved marks
@@ -658,12 +658,12 @@ for sw in 1 2 4 8 12 24; do
    BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
    BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
    php bootgly test benchmark HTTP_Server_CLI \
-      --competitors=bootgly,swoole-techempower --runner=tcp_client \
+      --opponents=bootgly,swoole-techempower --runner=tcp_client \
       --connections=512 --duration=10 --server-workers="$sw" --loads=1,2,3,4,5,6
 done
 ```
 
-Bootgly-internal set (no competitors), e.g. just the DB probes:
+Bootgly-internal set (no opponents), e.g. just the DB probes:
 
 ```bash
 cd bootgly
@@ -673,7 +673,7 @@ for sw in 1 2 4 8 12 24; do
    BOOTGLY_HTTP_SERVER_CLI_ROUTER=bootgly \
    BOOTGLY_HTTP_SERVER_CLI_LOADS=benchmark \
    php bootgly test benchmark HTTP_Server_CLI \
-      --competitors=bootgly --runner=tcp_client \
+      --opponents=bootgly --runner=tcp_client \
       --connections=512 --duration=10 --server-workers="$sw" --loads=13,14,15,16,17,18,19,20
 done
 ```
@@ -705,7 +705,7 @@ cd bootgly_benchmarks/scripts
   marks, so the `--loads` you ran during the sweep decide which subplots appear.
 - **X axis is auto-detected** (the config key with the most distinct values). Force
   it with `--x-key server-workers` if several keys vary.
-- **Baseline** defaults to the first competitor alphabetically; pass
+- **Baseline** defaults to the first opponent alphabetically; pass
   `--baseline Bootgly` to pin it (drives the ratio chart and `Δ` columns).
 - **Filenames** use the marks `# Config: load-set` key (`techempower` or
   `benchmark`), so the two sets never overwrite each other.

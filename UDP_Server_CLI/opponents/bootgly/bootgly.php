@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — UDP_Server_CLI — Bootgly Competitor
+ * Bootgly Benchmarks — UDP_Server_CLI — Bootgly Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop the Bootgly UDP Server for benchmarking.

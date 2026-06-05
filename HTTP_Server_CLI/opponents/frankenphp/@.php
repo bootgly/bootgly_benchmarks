@@ -1,16 +1,16 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — FrankenPHP Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — FrankenPHP Opponent
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 
 
 /** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
 
-$Runner->add(new Competitor(
+$Runner->add(new Opponent(
    name: 'FrankenPHP',
    version: function () {
       $output = exec('frankenphp --version 2>/dev/null') ?: '';

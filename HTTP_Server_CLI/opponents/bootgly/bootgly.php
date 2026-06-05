@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Bootgly Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Bootgly Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop the Bootgly HTTP Server for benchmarking.

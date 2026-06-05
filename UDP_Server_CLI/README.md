@@ -12,7 +12,7 @@ datagram echoed back = one response counted.
 - [Installation](#-installation)
 - [Loads](#-loads)
 - [Runners](#-runners)
-- [Competitors](#-competitors)
+- [Opponents](#-opponents)
 - [Configuration](#-configuration)
 - [Running Benchmarks](#-running-benchmarks)
 - [Environment Notes](#-environment-notes)
@@ -28,7 +28,7 @@ datagram echoed back = one response counted.
 | **lsof** | Port detection | ✅ |
 | **nproc** | CPU count detection | ✅ |
 
-No external competitor dependencies — the only competitor is Bootgly itself.
+No external opponent dependencies — the only opponent is Bootgly itself.
 
 ---
 
@@ -42,7 +42,7 @@ git clone https://github.com/bootgly/bootgly.git
 git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
-Nothing else to install — the Bootgly competitor boots through the
+Nothing else to install — the Bootgly opponent boots through the
 `bootgly project Benchmark --UDP_Server_CLI` command.
 
 ---
@@ -80,13 +80,13 @@ used by `TCP_Raw`).
 
 ---
 
-## 🏁 Competitors
+## 🏁 Opponents
 
 | Server | Language / Runtime | Mode | Used by |
 |--------|-------------------|------|---------|
 | **Bootgly** UDP Server CLI | PHP (event-loop) | Baseline | all loads |
 
-Each competitor lives in its own folder under `opponents/` and self-registers via
+Each opponent lives in its own folder under `opponents/` and self-registers via
 its own `@.php` (auto-discovered with `glob(opponents/*/@.php)` — you never edit the
 case's main `@.php`).
 
@@ -145,7 +145,7 @@ All commands run from the **bootgly** directory.
 
 | Option | Description |
 |--------|-------------|
-| `--competitors=NAME,...` | Filter competitors by name |
+| `--opponents=NAME,...` | Filter opponents by name |
 | `--loads=N,...` | Filter loads by 1-based index |
 | `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
 
@@ -164,7 +164,7 @@ All commands run from the **bootgly** directory.
 
 ## 📊 Results
 
-Single competitor — one table, one row per load:
+Single opponent — one table, one row per load:
 
 ```
   Bootgly

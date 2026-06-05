@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Progress_Bar — Bootgly Competitor
+ * Bootgly Benchmarks — Progress_Bar — Bootgly Opponent
  * --------------------------------------------------------------------------
  *
  * Renders 5000 Progress Bar iterations using Bootgly CLI.

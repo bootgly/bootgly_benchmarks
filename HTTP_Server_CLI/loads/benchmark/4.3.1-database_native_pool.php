@@ -1,7 +1,7 @@
 <?php
 // @label: Database micro multi-query
 // @group: Database microbenchmarks
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Three independent SELECT operations in one request.
 
 return [

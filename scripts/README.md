@@ -50,7 +50,7 @@ Files without `# Config:` are rejected with a clear error.
    --out ../HTTP_Server_CLI/results/ \
    --baseline Bootgly
 
-# Specify baseline competitor and force the X axis
+# Specify baseline opponent and force the X axis
 .venv/bin/python3 chart.py \
    --marks 'workdata/.../*.marks' --out report/ \
    --baseline Bootgly --x-key client-workers
@@ -85,10 +85,10 @@ The Markdown report contains:
   Swoole version, plus shared run configuration from the marks Config block.
 - **Command** — a `for`-loop reproducing the sweep, with the case-specific
   env vars filled in when known.
-- **Throughput chart** — one subplot per load, one line per competitor.
-- **Baseline / competitor ratio chart** — when more than one competitor.
+- **Throughput chart** — one subplot per load, one line per opponent.
+- **Baseline / opponent ratio chart** — when more than one opponent.
 - **Comparison tables** — one per load, with `Δ` against the baseline.
-- **Peaks** — best `req/s` per competitor and the gap at the baseline's peak.
+- **Peaks** — best `req/s` per opponent and the gap at the baseline's peak.
 - **Notes** — auto-generated observations (preflight failures, CPU
   oversubscription) and the list of source `.marks` files.
 
@@ -99,7 +99,7 @@ chart.py --marks GLOB --out DIR [options]
 
   --marks GLOB              Glob of .marks files (quote to prevent shell expansion).
   --out DIR                 Output directory (created if missing).
-  --baseline NAME           Baseline competitor for ratio chart and Δ column.
+  --baseline NAME           Baseline opponent for ratio chart and Δ column.
                             Default: first alphabetical.
   --x-key KEY               Force the X axis to this config key (skip auto-detect).
   --load-set NAME           Override load-set token in output filenames.

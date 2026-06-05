@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Hyperf Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Hyperf Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop Hyperf (Swoole engine, daemonized) for benchmarking.

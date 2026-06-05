@@ -1,7 +1,7 @@
 <?php
 // @label: Database resource query
 // @group: Database Bootgly resources
-// @competitors: Bootgly
+// @opponents: Bootgly
 // ADI PostgreSQL ping through HTTP_Server_CLI Response\Resources\Database.
 
 return [

@@ -1,18 +1,18 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — RoadRunner Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — RoadRunner Opponent
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 
 
 /** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
 
 $bootablesDir = dirname(__DIR__, 2) . '/bootables';
 
-$Runner->add(new Competitor(
+$Runner->add(new Opponent(
    name: 'RoadRunner',
    version: function () use ($bootablesDir) {
       $output = exec("cd {$bootablesDir}/roadrunner && ./rr -v 2>/dev/null") ?: '';

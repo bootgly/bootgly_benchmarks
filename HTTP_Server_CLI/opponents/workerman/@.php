@@ -1,18 +1,18 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Workerman Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Workerman Opponent
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 
 
 /** @var \Bootgly\ACI\Tests\Benchmark\Runner $Runner */
 
 $bootablesDir = dirname(__DIR__, 2) . '/bootables';
 
-$Runner->add(new Competitor(
+$Runner->add(new Opponent(
    name: 'Workerman',
    version: function () use ($bootablesDir) {
       $lock = @file_get_contents("{$bootablesDir}/workerman/composer.lock");

@@ -1,7 +1,7 @@
 <?php
 // @label: Plaintext
 // @group: TechEmpower
-// @competitors: all
+// @opponents: all
 // TechEmpower-style /plaintext: text/plain "Hello, World!".
 
 return [

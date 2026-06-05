@@ -1,7 +1,7 @@
 <?php
 // @label: Mixed (5 static + 3 dynamic)
 // @group: Mixed workloads
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Realistic workload combining both route types.
 
 $paths = [];

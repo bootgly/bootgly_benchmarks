@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Swoole (Coroutine) Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Swoole (Coroutine) Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop Swoole Coroutine HTTP Server for benchmarking.

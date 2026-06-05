@@ -1,7 +1,7 @@
 <?php
 // @label: Database fortunes
 // @group: TechEmpower
-// @competitors: all
+// @opponents: all
 // TechEmpower-style /fortunes: read Fortune table, append a runtime row,
 // sort by message, render as HTML table.
 

@@ -2,7 +2,7 @@
 """Generate trend report and charts from a range of Bootgly .bench.marks files.
 
 Parses .marks files (with the `# Config:` header introduced in Bootgly
-v0.16-beta), groups results by competitor + load, and renders three files
+v0.16-beta), groups results by opponent + load, and renders three files
 keyed by the load set and current timestamp:
 
     RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.md
@@ -21,7 +21,7 @@ override; defaults to `default` if neither marks nor CLI supplies one.
 
 Usage:
     chart.py --marks 'workdata/.../*.marks' --out OUTPUT_DIR \\
-             [--baseline COMPETITOR] [--x-key KEY] [--load-set NAME] \\
+             [--baseline OPPONENT] [--x-key KEY] [--load-set NAME] \\
              [--title TITLE]
 """
 
@@ -54,8 +54,8 @@ X_PREFERENCE = (
     "pipeline",
 )
 
-# Color palette for competitors and loads.
-COMPETITOR_COLORS = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444", "#0ea5e9"]
+# Color palette for opponents and loads.
+OPPONENT_COLORS = ["#3b82f6", "#f97316", "#10b981", "#a855f7", "#ef4444", "#0ea5e9"]
 LOAD_COLORS = [
     "#1d4ed8", "#7c3aed", "#dc2626", "#059669", "#0891b2", "#d97706",
     "#be185d", "#65a30d", "#0369a1", "#9333ea", "#ea580c", "#0f766e",
@@ -134,14 +134,14 @@ def parse_marks(path: Path) -> dict:
 
         m = RESULT_LINE.match(line)
         if m:
-            competitor = m.group(1)
+            opponent = m.group(1)
             load = m.group(2)
             rps: int | None = None
             for k, v in KV.findall(m.group(3)):
                 if k == "rps":
                     rps = None if v == "N/A" else int(v.replace(",", "").replace(".", ""))
                     break
-            results[(competitor, load)] = rps
+            results[(opponent, load)] = rps
 
     return {"benchmark": benchmark, "date": date, "config": config, "results": results}
 
@@ -166,7 +166,7 @@ def detect_x_key(parsed: list[dict], override: str | None) -> str:
 # Environment detection
 # ----------------------------------------------------------------------------
 
-def detect_environment(competitors: list[str]) -> dict[str, str]:
+def detect_environment(opponents: list[str]) -> dict[str, str]:
     """Auto-detect what we can about the host (best-effort, never raises)."""
     env: dict[str, str] = {}
 
@@ -186,7 +186,7 @@ def detect_environment(competitors: list[str]) -> dict[str, str]:
     except Exception:  # noqa: BLE001
         pass
 
-    swoole_mentioned = any("swoole" in c.lower() for c in competitors)
+    swoole_mentioned = any("swoole" in c.lower() for c in opponents)
     if swoole_mentioned:
         try:
             sw = subprocess.check_output(
@@ -205,7 +205,7 @@ def detect_environment(competitors: list[str]) -> dict[str, str]:
 # Charts
 # ----------------------------------------------------------------------------
 
-def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, competitors, data):
+def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponents, data):
     n = len(loads)
     if n <= 1:
         cols = 1
@@ -220,9 +220,9 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, competi
 
     for i, load in enumerate(loads):
         ax = axes[i // cols][i % cols]
-        for j, c in enumerate(competitors):
+        for j, c in enumerate(opponents):
             ys = [float(v) if v is not None else None for v in data[load][c]]
-            color = COMPETITOR_COLORS[j % len(COMPETITOR_COLORS)]
+            color = OPPONENT_COLORS[j % len(OPPONENT_COLORS)]
             ax.plot(x_values, ys, marker="o", linewidth=2, color=color, label=c)
         ax.set_title(_load_title(load), fontsize=11)
         ax.set_xlabel(x_key)
@@ -239,8 +239,8 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, competi
     plt.close(fig)
 
 
-def plot_ratio(path: Path, title: str, x_key: str, x_values, loads, competitors, data, baseline):
-    others = [c for c in competitors if c != baseline]
+def plot_ratio(path: Path, title: str, x_key: str, x_values, loads, opponents, data, baseline):
+    others = [c for c in opponents if c != baseline]
     if not others:
         return
 
@@ -272,7 +272,7 @@ def plot_ratio(path: Path, title: str, x_key: str, x_values, loads, competitors,
     ax.axhline(1.0, color="#6b7280", linewidth=1, linestyle="--", label="Parity (1.0)")
     ax.set_title(f"{baseline} ratio vs {'/'.join(others)} — {title}", fontsize=13, fontweight="bold")
     ax.set_xlabel(x_key)
-    ax.set_ylabel(f"{baseline} req/s ÷ competitor req/s")
+    ax.set_ylabel(f"{baseline} req/s ÷ opponent req/s")
     ax.grid(True, alpha=0.3)
     ax.legend(**legend_kwargs)
     ax.set_ylim(bottom=0)
@@ -300,7 +300,7 @@ def _delta(base: int | None, other: int | None) -> str:
     return f"{sign}{pct:.1f}%"
 
 
-def _competitor_slug(name: str) -> str:
+def _opponent_slug(name: str) -> str:
     return re.sub(r"[\s_]+", "-", name.strip().lower())
 
 
@@ -310,7 +310,7 @@ def _fmt_x(v) -> str:
     return str(v)
 
 
-def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared: dict[str, str], competitors: list[str], loads: list[str]) -> str:
+def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared: dict[str, str], opponents: list[str], loads: list[str]) -> str:
     """Best-effort `for`-loop reproducing the sweep."""
     env_pairs: list[str] = []
 
@@ -340,7 +340,7 @@ def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared
         loop_var = "x"
     flag_lines.append(f'--{x_key}="${loop_var}"')
 
-    competitors_csv = ",".join(_competitor_slug(c) for c in competitors)
+    opponents_csv = ",".join(_opponent_slug(c) for c in opponents)
     x_range = " ".join(_fmt_x(v) for v in x_values)
 
     lines = ["```bash", f"for {loop_var} in {x_range}; do"]
@@ -352,7 +352,7 @@ def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared
             lines.append(f"       {ev} \\")
 
     lines.append(f"   php bootgly test benchmark {case} \\")
-    lines.append(f"      --competitors={competitors_csv} \\")
+    lines.append(f"      --opponents={opponents_csv} \\")
     for fl in flag_lines[:-1]:
         lines.append(f"      {fl} \\")
     lines.append(f"      {flag_lines[-1]} \\")
@@ -373,13 +373,13 @@ def write_report(
     x_key: str,
     x_values,
     loads,
-    competitors,
+    opponents,
     data,
     baseline,
     marks_paths,
     parsed,
 ):
-    others = [c for c in competitors if c != baseline]
+    others = [c for c in opponents if c != baseline]
 
     # Shared config (constant across the sweep).
     shared: dict[str, str] = {}
@@ -390,13 +390,13 @@ def write_report(
             if all(p["config"].get(k) == v for p in parsed):
                 shared[k] = v
 
-    env = detect_environment(competitors)
+    env = detect_environment(opponents)
 
     # N/A detection for notes
     any_na = any(
         v is None
         for s in loads
-        for c in competitors
+        for c in opponents
         for v in data[s][c]
     )
 
@@ -431,7 +431,7 @@ def write_report(
     lines.append("")
     lines.append("Reproduction sweep — replace `<IDS>` with the original `--loads=` argument:")
     lines.append("")
-    lines.append(_reproduction_command(case, load_set, x_key, x_values, shared, competitors, loads))
+    lines.append(_reproduction_command(case, load_set, x_key, x_values, shared, opponents, loads))
     lines.append("")
 
     # ## Throughput
@@ -442,11 +442,11 @@ def write_report(
 
     # ## Ratio
     if others:
-        lines.append(f"## {baseline} / competitor ratio")
+        lines.append(f"## {baseline} / opponent ratio")
         lines.append("")
         lines.append(f"![Ratio chart]({chart_ratio_name})")
         lines.append("")
-        lines.append(f"Ratio > 1.0 means **{baseline}** is faster than the competitor at that {x_key}.")
+        lines.append(f"Ratio > 1.0 means **{baseline}** is faster than the opponent at that {x_key}.")
         lines.append("")
 
     # ## Comparison tables
@@ -455,14 +455,14 @@ def write_report(
     for load in loads:
         lines.append(f"### {load}")
         lines.append("")
-        header = [f"`{x_key}`"] + competitors[:]
+        header = [f"`{x_key}`"] + opponents[:]
         if others:
             header.append(f"Δ ({baseline} vs {others[0]})")
         lines.append("| " + " | ".join(header) + " |")
         lines.append("|" + "|".join(["---:" for _ in header]) + "|")
         for i, x in enumerate(x_values):
             row = [str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)]
-            for c in competitors:
+            for c in opponents:
                 row.append(_fmt(data[load][c][i]))
             if others:
                 row.append(_delta(data[load][baseline][i], data[load][others[0]][i]))
@@ -472,7 +472,7 @@ def write_report(
     # ## Peaks
     lines.append("## Peaks")
     lines.append("")
-    head = ["Load"] + [f"{c} peak (req/s @ {x_key})" for c in competitors]
+    head = ["Load"] + [f"{c} peak (req/s @ {x_key})" for c in opponents]
     if others:
         head.append(f"Δ at {baseline} peak")
     lines.append("| " + " | ".join(head) + " |")
@@ -480,7 +480,7 @@ def write_report(
     for load in loads:
         row = [load]
         peak_indices: dict[str, int] = {}
-        for c in competitors:
+        for c in opponents:
             series = [v if v is not None else 0 for v in data[load][c]]
             i = series.index(max(series))
             peak_indices[c] = i
@@ -541,7 +541,7 @@ def main() -> int:
     )
     ap.add_argument("--marks", required=True, help="Glob of .marks files (quote to prevent shell expansion).")
     ap.add_argument("--out", required=True, help="Output directory (created if missing).")
-    ap.add_argument("--baseline", default=None, help="Baseline competitor for ratio chart and Δ column (default: first alphabetical).")
+    ap.add_argument("--baseline", default=None, help="Baseline opponent for ratio chart and Δ column (default: first alphabetical).")
     ap.add_argument("--x-key", dest="x_key", default=None, help="Force X axis to this config key.")
     ap.add_argument("--load-set", dest="load_set", default=None, help="Override load-set token used in output filenames (default: from marks Config or 'default').")
     ap.add_argument("--title", default=None, help="Optional report title (defaults to case + sweep summary).")
@@ -579,26 +579,26 @@ def main() -> int:
     marks_paths = [p["__source__"] for p in parsed]
     x_values: list = [_x(p) for p in parsed]
 
-    competitors: list[str] = []
+    opponents: list[str] = []
     loads: list[str] = []
     for p in parsed:
         for (c, s) in p["results"]:
-            if c not in competitors:
-                competitors.append(c)
+            if c not in opponents:
+                opponents.append(c)
             if s not in loads:
                 loads.append(s)
 
     data: dict[str, dict[str, list[int | None]]] = {
-        s: {c: [] for c in competitors} for s in loads
+        s: {c: [] for c in opponents} for s in loads
     }
     for p in parsed:
         for s in loads:
-            for c in competitors:
+            for c in opponents:
                 data[s][c].append(p["results"].get((c, s)))
 
-    baseline = args.baseline or sorted(competitors)[0]
-    if baseline not in competitors:
-        raise SystemExit(f"--baseline '{baseline}' not present in results. Available: {competitors}")
+    baseline = args.baseline or sorted(opponents)[0]
+    if baseline not in opponents:
+        raise SystemExit(f"--baseline '{baseline}' not present in results. Available: {opponents}")
 
     case = parsed[0]["benchmark"] or "Benchmark"
     load_set = (
@@ -618,8 +618,8 @@ def main() -> int:
 
     title = args.title or f"{case} — {load_set} sweep over {x_key}"
 
-    plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, competitors, data)
-    plot_ratio(out_dir / chart_ratio_name, title, x_key, x_values, loads, competitors, data, baseline)
+    plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, opponents, data)
+    plot_ratio(out_dir / chart_ratio_name, title, x_key, x_values, loads, opponents, data, baseline)
     write_report(
         out_dir / report_name,
         chart_throughput_name,
@@ -630,7 +630,7 @@ def main() -> int:
         x_key,
         x_values,
         loads,
-        competitors,
+        opponents,
         data,
         baseline,
         marks_paths,

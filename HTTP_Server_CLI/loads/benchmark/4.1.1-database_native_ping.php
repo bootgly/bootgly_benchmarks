@@ -1,7 +1,7 @@
 <?php
 // @label: Database micro query
 // @group: Database microbenchmarks
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Minimal SELECT 1 helper overhead.
 
 return [

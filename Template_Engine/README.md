@@ -12,7 +12,7 @@ directive rendering speed without sacrificing features.
 - [Installation](#-installation)
 - [Loads](#-loads)
 - [Runners](#-runners)
-- [Competitors](#-competitors)
+- [Opponents](#-opponents)
 - [Configuration](#-configuration)
 - [Running Benchmarks](#-running-benchmarks)
 - [Context](#-context)
@@ -26,7 +26,7 @@ directive rendering speed without sacrificing features.
 | Dependency | Purpose | Required |
 |-----------|---------|----------|
 | **PHP** ≥ 8.4 | Runtime | ✅ |
-| **Composer** | Installs the Laravel Blade competitor | Only for the `laravel` competitor |
+| **Composer** | Installs the Laravel Blade opponent | Only for the `laravel` opponent |
 
 ---
 
@@ -40,7 +40,7 @@ git clone https://github.com/bootgly/bootgly.git
 git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
-The Bootgly competitor needs nothing extra. For the Laravel Blade competitor,
+The Bootgly opponent needs nothing extra. For the Laravel Blade opponent,
 install its dependencies once:
 
 ```bash
@@ -52,7 +52,7 @@ composer install
 
 ## 🎯 Loads
 
-This case uses the **Code** runner, so there are no request loads — each competitor
+This case uses the **Code** runner, so there are no request loads — each opponent
 renders one fixed template as a subprocess:
 
 | Workload | Description |
@@ -66,26 +66,26 @@ immediately after) so other factors do not affect accuracy.
 
 ## 🔧 Runners
 
-Uses the **Code** runner (`runners/Code.php`), which executes each competitor as a
+Uses the **Code** runner (`runners/Code.php`), which executes each opponent as a
 subprocess and measures wall-clock time and peak memory. Best result over
 `--iterations` is kept.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--iterations=N` | `1` | Iterations per competitor (best is kept) |
+| `--iterations=N` | `1` | Iterations per opponent (best is kept) |
 | `--timeout=N` | `120` | Timeout in seconds per execution |
 | `--warmup=N` | `0` | Warmup iterations (discarded) |
 
 ---
 
-## 🏁 Competitors
+## 🏁 Opponents
 
-| Competitor | Runtime | Engine | CLI name |
+| Opponent | Runtime | Engine | CLI name |
 |-----------|---------|--------|----------|
 | **Bootgly** | PHP | `ABI\Templates\Template` | `bootgly` |
 | **Laravel** | PHP | Blade (`Illuminate\View`) | `laravel` |
 
-Each competitor lives in its own folder under `opponents/` and self-registers via
+Each opponent lives in its own folder under `opponents/` and self-registers via
 its own `@.php` (auto-discovered with `glob(opponents/*/@.php)` — you never edit the
 case's main `@.php`).
 
@@ -99,7 +99,7 @@ case's main `@.php`).
 # Tier 1 — list available cases
 ./bootgly test benchmark --help
 
-# Tier 2 — case-specific options (Code runner options + competitors)
+# Tier 2 — case-specific options (Code runner options + opponents)
 ./bootgly test benchmark Template_Engine --help
 ```
 
@@ -110,22 +110,22 @@ case's main `@.php`).
 All commands run from the **bootgly** directory.
 
 ```bash
-# All competitors, defaults
+# All opponents, defaults
 ./bootgly test benchmark Template_Engine
 
-# Both competitors, 3 iterations (best kept)
-./bootgly test benchmark Template_Engine --competitors=bootgly,laravel --iterations=3
+# Both opponents, 3 iterations (best kept)
+./bootgly test benchmark Template_Engine --opponents=bootgly,laravel --iterations=3
 
 # Bootgly only
-./bootgly test benchmark Template_Engine --competitors=bootgly
+./bootgly test benchmark Template_Engine --opponents=bootgly
 ```
 
 ### Global options
 
 | Option | Description |
 |--------|-------------|
-| `--competitors=NAME,...` | Filter competitors (`bootgly`, `laravel`) |
-| `--iterations=N` | Iterations per competitor |
+| `--opponents=NAME,...` | Filter opponents (`bootgly`, `laravel`) |
+| `--iterations=N` | Iterations per opponent |
 | `--timeout=N` | Timeout in seconds per execution |
 | `--warmup=N` | Warmup iterations (discarded) |
 
@@ -150,8 +150,8 @@ The Bootgly engine does **not** sacrifice any feature available in Blade's
 
 ## ⚠️ Environment Notes
 
-- **Subprocess isolation**: each competitor runs in its own PHP process; memory is the peak of that process.
-- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between competitors stays consistent across environments. If Bootgly is faster in one environment, it is faster in others, even if the exact speedup factor varies.
+- **Subprocess isolation**: each opponent runs in its own PHP process; memory is the peak of that process.
+- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between opponents stays consistent across environments. If Bootgly is faster in one environment, it is faster in others, even if the exact speedup factor varies.
 - **Best-of-N**: with `--iterations>1`, the fastest run is reported to reduce noise.
 
 ---

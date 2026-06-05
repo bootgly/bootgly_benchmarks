@@ -1,7 +1,7 @@
 <?php
 // @label: Database single query
 // @group: TechEmpower
-// @competitors: all
+// @opponents: all
 // TechEmpower-style /db: fetch one random World row.
 
 return [

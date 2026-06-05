@@ -1,7 +1,7 @@
 <?php
 // @label: Database micro sleep
 // @group: Database async probe
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Low-level ADI PostgreSQL slow query with event-loop wait.
 
 return [

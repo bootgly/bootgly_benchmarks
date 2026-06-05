@@ -1,7 +1,7 @@
 <?php
 // @label: 10 dynamic routes
 // @group: Dynamic routes
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Round-robins through all 10 registered dynamic routes.
 
 $paths = [];

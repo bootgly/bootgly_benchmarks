@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — FrankenPHP Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — FrankenPHP Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop FrankenPHP (Worker Mode) for benchmarking.

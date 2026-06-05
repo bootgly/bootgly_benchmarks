@@ -1,7 +1,7 @@
 <?php
 // @label: JSON
 // @group: TechEmpower
-// @competitors: all
+// @opponents: all
 // TechEmpower-style /json: application/json {"message":"Hello, World!"}.
 
 return [

@@ -1,7 +1,7 @@
 <?php
 // @label: 100 dynamic routes
 // @group: Dynamic routes
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Round-robins through all 100 registered dynamic routes.
 
 $prefixes = ['/user/', '/post/article-', '/api/v1/resource-', '/category/cat-', '/tag/tag-', '/product/sku-', '/order/ord-', '/invoice/inv-', '/review/rev-', '/comment/cmt-'];

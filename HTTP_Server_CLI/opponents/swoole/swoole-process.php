@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Swoole (Process) Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Swoole (Process) Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop Swoole in SWOOLE_PROCESS mode for benchmarking.

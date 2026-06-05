@@ -33,7 +33,7 @@ $Runner->duration = 10;
 // @ Load PHP loads
 $Runner->load(__DIR__ . '/loads');
 
-// @ Auto-register competitors — each folder self-registers via its own @.php
+// @ Auto-register opponents — each folder self-registers via its own @.php
 foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
    require $opponentFile;
 }

@@ -1,7 +1,7 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — Workerman Competitor
+ * Bootgly Benchmarks — HTTP_Server_CLI — Workerman Opponent
  * --------------------------------------------------------------------------
  *
  * Start/stop Workerman for benchmarking.

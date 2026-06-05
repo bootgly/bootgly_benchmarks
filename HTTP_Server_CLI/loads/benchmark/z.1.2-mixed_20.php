@@ -1,7 +1,7 @@
 <?php
 // @label: Mixed (10 static + 10 dynamic)
 // @group: Mixed workloads
-// @competitors: Bootgly
+// @opponents: Bootgly
 // Realistic heavy workload combining all route types.
 
 $statics = ['/', '/about', '/contact', '/blog', '/pricing', '/docs', '/faq', '/terms', '/privacy', '/status'];

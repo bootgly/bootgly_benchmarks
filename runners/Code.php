@@ -3,12 +3,12 @@
  * --------------------------------------------------------------------------
  * Bootgly Benchmarks — Code Runner
  * --------------------------------------------------------------------------
- * Local code execution runner. Spawns competitors as subprocesses,
+ * Local code execution runner. Spawns opponents as subprocesses,
  * measures time and memory via JSON result file.
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Competitor;
+use Bootgly\ACI\Tests\Benchmark\Opponent;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
@@ -19,12 +19,12 @@ return new class extends Runner
    public protected(set) string $name = 'code';
    // * Config
    /**
-    * Timeout in seconds for each competitor execution.
+    * Timeout in seconds for each opponent execution.
     */
    public int $timeout = 120;
 
    /**
-    * Number of iterations per competitor. Best result is kept.
+    * Number of iterations per opponent. Best result is kept.
     */
    public int $iterations = 1;
 
@@ -49,7 +49,7 @@ return new class extends Runner
    public function options (): array
    {
       return [
-         '--iterations=N' => 'Number of iterations per competitor (default: 1)',
+         '--iterations=N' => 'Number of iterations per opponent (default: 1)',
          '--timeout=N'    => 'Timeout in seconds per execution (default: 120)',
          '--warmup=N'     => 'Number of warmup runs (default: 0)',
       ];
@@ -59,24 +59,24 @@ return new class extends Runner
    {
       $results = [];
 
-      foreach ($this->competitors as $Competitor) {
+      foreach ($this->opponents as $Opponent) {
          // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
-         if ($Configs->competitors !== null && !in_array(Configs::slug($Competitor->name), array_map(Configs::slug(...), $Configs->competitors))) {
+         if ($Configs->opponents !== null && !in_array(Configs::slug($Opponent->name), array_map(Configs::slug(...), $Configs->opponents))) {
             continue;
          }
 
-         // @ Identify competitor
-         echo "\n  ▶ {$Competitor->name}\n\n";
+         // @ Identify opponent
+         echo "\n  ▶ {$Opponent->name}\n\n";
 
          // @ Warmup
          for ($i = 0; $i < $this->warmup; $i++) {
-            $this->execute($Competitor);
+            $this->execute($Opponent);
          }
 
          // @ Run iterations (keep best)
          $best = null;
          for ($i = 0; $i < $this->iterations; $i++) {
-            $Result = $this->execute($Competitor);
+            $Result = $this->execute($Opponent);
 
             if ($Result === null) {
                continue;
@@ -93,16 +93,16 @@ return new class extends Runner
             }
          }
 
-         $results[$Competitor->name] = ['default' => $best ?? new Result];
+         $results[$Opponent->name] = ['default' => $best ?? new Result];
       }
 
       return $results;
    }
 
    // @ Execution
-   private function execute (Competitor $Competitor): null|Result
+   private function execute (Opponent $Opponent): null|Result
    {
-      // @ Prepare result file (competitor writes JSON here instead of stdout)
+      // @ Prepare result file (opponent writes JSON here instead of stdout)
       $resultFile = sys_get_temp_dir() . '/bootgly_bench_' . getmypid() . '_' . uniqid() . '.json';
       putenv("BENCHMARK_RESULT_FILE=$resultFile");
 
@@ -114,7 +114,7 @@ return new class extends Runner
       ];
 
       $process = proc_open(
-         command: ['php', $Competitor->script],
+         command: ['php', $Opponent->script],
          descriptor_spec: $descriptors,
          pipes: $pipes,
       );

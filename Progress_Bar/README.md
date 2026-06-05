@@ -16,7 +16,7 @@ Symfony/Laravel ProgressBar.
 - [Installation](#-installation)
 - [Loads](#-loads)
 - [Runners](#-runners)
-- [Competitors](#-competitors)
+- [Opponents](#-opponents)
 - [Configuration](#-configuration)
 - [Running Benchmarks](#-running-benchmarks)
 - [Context](#-context)
@@ -30,7 +30,7 @@ Symfony/Laravel ProgressBar.
 | Dependency | Purpose | Required |
 |-----------|---------|----------|
 | **PHP** ≥ 8.4 | Runtime | ✅ |
-| **Composer** | Installs the Laravel/Symfony competitor | Only for the `laravel` competitor |
+| **Composer** | Installs the Laravel/Symfony opponent | Only for the `laravel` opponent |
 
 ---
 
@@ -44,7 +44,7 @@ git clone https://github.com/bootgly/bootgly.git
 git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
-The Bootgly competitor needs nothing extra. For the Laravel/Symfony competitor,
+The Bootgly opponent needs nothing extra. For the Laravel/Symfony opponent,
 install its dependencies once:
 
 ```bash
@@ -56,7 +56,7 @@ composer install
 
 ## 🎯 Loads
 
-This case uses the **Code** runner, so there are no request loads — each competitor
+This case uses the **Code** runner, so there are no request loads — each opponent
 runs one fixed workload as a subprocess:
 
 | Workload | Description |
@@ -70,26 +70,26 @@ throughput — no application processing happens inside the loop.
 
 ## 🔧 Runners
 
-Uses the **Code** runner (`runners/Code.php`), which executes each competitor as a
+Uses the **Code** runner (`runners/Code.php`), which executes each opponent as a
 subprocess and measures wall-clock time and peak memory. Best result over
 `--iterations` is kept.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--iterations=N` | `1` | Iterations per competitor (best is kept) |
+| `--iterations=N` | `1` | Iterations per opponent (best is kept) |
 | `--timeout=N` | `120` | Timeout in seconds per execution |
 | `--warmup=N` | `0` | Warmup iterations (discarded) |
 
 ---
 
-## 🏁 Competitors
+## 🏁 Opponents
 
-| Competitor | Runtime | Component | CLI name |
+| Opponent | Runtime | Component | CLI name |
 |-----------|---------|-----------|----------|
 | **Bootgly** | PHP | `CLI\UI\Components\Progress` | `bootgly` |
 | **Laravel / Symfony** | PHP | `Symfony\Console\Helper\ProgressBar` | `laravel` |
 
-Each competitor lives in its own folder under `opponents/` and self-registers via
+Each opponent lives in its own folder under `opponents/` and self-registers via
 its own `@.php` (auto-discovered with `glob(opponents/*/@.php)` — you never edit the
 case's main `@.php`).
 
@@ -103,7 +103,7 @@ case's main `@.php`).
 # Tier 1 — list available cases
 ./bootgly test benchmark --help
 
-# Tier 2 — case-specific options (Code runner options + competitors)
+# Tier 2 — case-specific options (Code runner options + opponents)
 ./bootgly test benchmark Progress_Bar --help
 ```
 
@@ -114,22 +114,22 @@ case's main `@.php`).
 All commands run from the **bootgly** directory.
 
 ```bash
-# All competitors, defaults
+# All opponents, defaults
 ./bootgly test benchmark Progress_Bar
 
-# Both competitors, 3 iterations (best kept)
-./bootgly test benchmark Progress_Bar --competitors=bootgly,laravel --iterations=3
+# Both opponents, 3 iterations (best kept)
+./bootgly test benchmark Progress_Bar --opponents=bootgly,laravel --iterations=3
 
 # Bootgly only
-./bootgly test benchmark Progress_Bar --competitors=bootgly
+./bootgly test benchmark Progress_Bar --opponents=bootgly
 ```
 
 ### Global options
 
 | Option | Description |
 |--------|-------------|
-| `--competitors=NAME,...` | Filter competitors (`bootgly`, `laravel`) |
-| `--iterations=N` | Iterations per competitor |
+| `--opponents=NAME,...` | Filter opponents (`bootgly`, `laravel`) |
+| `--iterations=N` | Iterations per opponent |
 | `--timeout=N` | Timeout in seconds per execution |
 | `--warmup=N` | Warmup iterations (discarded) |
 
@@ -150,8 +150,8 @@ of iterations.
 
 ## ⚠️ Environment Notes
 
-- **Subprocess isolation**: each competitor runs in its own PHP process; memory is the peak of that process.
-- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between competitors stays consistent across environments.
+- **Subprocess isolation**: each opponent runs in its own PHP process; memory is the peak of that process.
+- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between opponents stays consistent across environments.
 - **Best-of-N**: with `--iterations>1`, the fastest run is reported to reduce noise.
 
 ---

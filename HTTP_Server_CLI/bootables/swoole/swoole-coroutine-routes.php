@@ -6,7 +6,7 @@
  * Multi-process via pcntl_fork() + SO_REUSEPORT for fair comparison.
  * Each forked process runs its own coroutine HTTP server on the same port.
  *
- * Same route set as all benchmark competitors:
+ * Same route set as all benchmark opponents:
  * 100 static + 100 dynamic + 6 nested + 3 middleware + catch-all 404.
  *
  * Usage: php swoole-coroutine-routes.php

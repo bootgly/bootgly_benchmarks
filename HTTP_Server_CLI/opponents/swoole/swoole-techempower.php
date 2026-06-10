@@ -31,6 +31,10 @@ match ($action) {
    })(),
 
    'stop' => (function () use ($port) {
+      // Kill the master by process pattern first: it does not listen on the
+      // port, so a port-only kill leaves it alive respawning workers that
+      // steal benchmark connections via SO_REUSEPORT.
+      exec("pkill -9 -f swoole-techempower-postgres.php 2>/dev/null");
       exec("lsof -ti :{$port} 2>/dev/null | xargs kill -9 2>/dev/null");
    })(),
 

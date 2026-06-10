@@ -73,34 +73,42 @@ return new class extends Runner
             $this->execute($Opponent);
          }
 
-         // @ Run iterations (keep best)
-         $best = null;
+         // @ Run iterations (keep best per label)
+         $bestByLabel = [];
          for ($i = 0; $i < $this->iterations; $i++) {
-            $Result = $this->execute($Opponent);
+            $Results = $this->execute($Opponent);
 
-            if ($Result === null) {
+            if ($Results === null) {
                continue;
             }
 
-            if (
-               $best === null
-               || (
-                  $Result->time !== null
-                  && ($best->time === null || (float) $Result->time < (float) $best->time)
-               )
-            ) {
-               $best = $Result;
+            foreach ($Results as $label => $Result) {
+               $current = $bestByLabel[$label] ?? null;
+
+               if (
+                  $current === null
+                  || (
+                     $Result->time !== null
+                     && ($current->time === null || (float) $Result->time < (float) $current->time)
+                  )
+               ) {
+                  $bestByLabel[$label] = $Result;
+               }
             }
          }
 
-         $results[$Opponent->name] = ['default' => $best ?? new Result];
+         // ! Fully unavailable opponent → empty map; the report renders N/A per operation
+         $results[$Opponent->name] = $bestByLabel;
       }
 
       return $results;
    }
 
    // @ Execution
-   private function execute (Opponent $Opponent): null|Result
+   /**
+    * @return null|array<string,Result> Operation label => Result (flat results map to ['default' => Result]).
+    */
+   private function execute (Opponent $Opponent): null|array
    {
       // @ Prepare result file (opponent writes JSON here instead of stdout)
       $resultFile = sys_get_temp_dir() . '/bootgly_bench_' . getmypid() . '_' . uniqid() . '.json';
@@ -143,13 +151,33 @@ return new class extends Runner
 
       $data = json_decode($json, true);
 
-      if ( !is_array($data) ) {
+      if ( !is_array($data) || $data === [] ) {
          return null;
       }
 
-      return new Result(
-         time: isset($data['time']) ? (string) abs((float) $data['time']) : null,
-         memory: $data['memory'] ?? null,
-      );
+      // ? Detect label map (every value is an array) vs flat single result
+      $isMap = true;
+      foreach ($data as $entry) {
+         if ( !is_array($entry) ) {
+            $isMap = false;
+            break;
+         }
+      }
+
+      // ! Normalize flat result to a single 'default' label
+      if ($isMap === false) {
+         $data = ['default' => $data];
+      }
+
+      // @ Build one Result per label
+      $Results = [];
+      foreach ($data as $label => $entry) {
+         $Results[(string) $label] = new Result(
+            time: isset($entry['time']) ? (string) abs((float) $entry['time']) : null,
+            memory: $entry['memory'] ?? null,
+         );
+      }
+
+      return $Results;
    }
 };

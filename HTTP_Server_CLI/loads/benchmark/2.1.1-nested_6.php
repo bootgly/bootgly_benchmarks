@@ -1,7 +1,7 @@
 <?php
 // @label: 6 nested routes (2 groups)
 // @group: Nested routes
-// @opponents: Bootgly
+// @opponents: all
 // Round-robins through admin and account group routes.
 
 return [

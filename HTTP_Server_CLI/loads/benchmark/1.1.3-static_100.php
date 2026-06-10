@@ -1,7 +1,7 @@
 <?php
 // @label: 100 static routes
 // @group: Static routes
-// @opponents: Bootgly
+// @opponents: all
 // Round-robins through all 100 registered static routes.
 
 $paths = ['/', '/about', '/contact', '/blog', '/pricing', '/docs', '/faq', '/terms', '/privacy', '/status'];

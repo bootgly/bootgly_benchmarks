@@ -1,7 +1,7 @@
 <?php
 // @label: 3 middleware routes
 // @group: Middleware routes
-// @opponents: Bootgly
+// @opponents: all
 // Round-robins through protected routes that apply middleware.
 
 return [

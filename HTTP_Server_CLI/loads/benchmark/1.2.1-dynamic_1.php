@@ -1,7 +1,7 @@
 <?php
 // @label: 1 dynamic route
 // @group: Dynamic routes
-// @opponents: Bootgly
+// @opponents: all
 // Hits /user/:id with rotating IDs.
 
 $paths = [];

@@ -17,7 +17,10 @@
 
 
 // @ Bootstrap Bootgly class autoloader (without CLI framework boot)
-$rootDir = \realpath(__DIR__ . '/../../../bootgly') . '/';
+// BOOTGLY_CLIENT_DIR env overrides the default sibling checkout (e.g. to run
+// the load generator from a git worktree of bootgly for client-side A/B).
+$clientDir = \getenv('BOOTGLY_CLIENT_DIR') ?: \realpath(__DIR__ . '/../../../bootgly');
+$rootDir = \rtrim((string) $clientDir, '/') . '/';
 if (!\defined('BOOTGLY_ROOT_BASE')) {
    \define('BOOTGLY_ROOT_BASE', \rtrim($rootDir, '/'));
    \define('BOOTGLY_ROOT_DIR', $rootDir);
@@ -175,6 +178,24 @@ function runWorker (
    /** @var array<int,float> $writeTimes */
    $writeTimes        = [];
 
+   // @ Optional excimer sampling profiler (BOOTGLY_CLIENT_PROFILE=1)
+   if (\getenv('BOOTGLY_CLIENT_PROFILE') && \class_exists(\ExcimerProfiler::class)) {
+      $Profiler = new \ExcimerProfiler;
+      $Profiler->setPeriod(0.0001);
+      $Profiler->setEventType(\EXCIMER_CPU);
+      $Profiler->setMaxDepth(64);
+      $Profiler->start();
+      \register_shutdown_function(static function () use ($Profiler): void {
+         $Profiler->stop();
+         $dir = '/tmp/bootgly_client_profile';
+         @\mkdir($dir, 0777, true);
+         \file_put_contents(
+            $dir . '/client-' . \getmypid() . '.collapsed',
+            $Profiler->getLog()->formatCollapsed()
+         );
+      });
+   }
+
    $Client = new TCP_Client_CLI(TCP_Client_CLI::MODE_DEFAULT);
    // Unlock immediately — lock is for singleton enforcement, not needed for benchmark workers
    /** @var \Bootgly\ACI\Process $Process */
@@ -237,13 +258,29 @@ function runWorker (
                   $burst .= $requests[$requestIndex % $pathCount];
                   $requestIndex++;
                }
-               $Connection->output = $burst;
             } else {
-               $Connection->output = $requests[$requestIndex % $pathCount];
+               $burst = $requests[$requestIndex % $pathCount];
                $requestIndex++;
             }
 
-            // @ Switch to write mode (remove from reads to prevent being in both sets)
+            $length = \strlen($burst);
+            if ($length === 0) {
+               return; // partial response, nothing to replenish yet — stay in read mode
+            }
+
+            // @ Direct write: a keep-alive socket that just delivered a response is
+            //   almost always writable — skip the EVENT_WRITE round-trip (saves one
+            //   select() round + 4 event-set mutations per request/response cycle).
+            $sent = @\fwrite($Socket, $burst);
+            $writeTimes[$socketId] = microtime(true);
+
+            if ($sent === $length) {
+               return; // stay registered for EVENT_READ
+            }
+
+            // @ Partial/failed write — defer the remainder to the event loop
+            //   (onDataWrite flips the connection back to read mode after flush).
+            $Connection->output = $sent === false ? $burst : \substr($burst, $sent);
             TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
          };

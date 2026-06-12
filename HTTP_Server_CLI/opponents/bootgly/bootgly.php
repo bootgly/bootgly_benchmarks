@@ -11,7 +11,9 @@
  *   php bootgly.php stop
  */
 
-$bootglyDir = __DIR__ . '/../../../../bootgly';
+// @ BOOTGLY_DIR env overrides the default sibling checkout (e.g. to benchmark
+//   a git worktree of bootgly without touching the main working copy).
+$bootglyDir = getenv('BOOTGLY_DIR') ?: __DIR__ . '/../../../../bootgly';
 
 $action = $argv[1] ?? 'start';
 

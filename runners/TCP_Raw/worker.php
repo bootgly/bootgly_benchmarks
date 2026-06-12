@@ -195,8 +195,28 @@ function runWorker (
                unset($writeTimes[$socketId]);
             }
 
-            // @ Send next message (no pipelining: 1 message at a time)
-            $Connection->output = $message;
+            // @ Replenish: send exactly $count messages to replace received
+            //   responses (no pipelining: 1 in flight per connection).
+            if ($count === 0) {
+               return; // partial response — stay in read mode
+            }
+            $burst = $count === 1 ? $message : \str_repeat($message, $count);
+            $length = \strlen($burst);
+
+            // @ Direct write: a keep-alive socket that just delivered a response
+            //   is almost always writable — skip the EVENT_WRITE round-trip
+            //   (saves one select() round + 4 event-set mutations per cycle).
+            //   Same pattern as runners/TCP_Client/worker.php.
+            $sent = @\fwrite($Socket, $burst);
+            $writeTimes[$socketId] = microtime(true);
+
+            if ($sent === $length) {
+               return; // stay registered for EVENT_READ
+            }
+
+            // @ Partial/failed write — defer the remainder to the event loop
+            //   (onDataWrite flips the connection back to read mode after flush).
+            $Connection->output = $sent === false ? $burst : \substr($burst, $sent);
             TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
          };

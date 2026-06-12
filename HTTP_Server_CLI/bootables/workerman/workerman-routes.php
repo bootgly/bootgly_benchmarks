@@ -14,6 +14,25 @@ $http_worker->onWorkerStart = function () {
     Timer::add(1, function() {
         Header::$date = gmdate('D, d M Y H:i:s').' GMT';
     });
+
+    // Per-worker sampling profiler (env-gated) — mirrors Bootgly's
+    // projects/Benchmark/HTTP_Server_CLI/Profiler.php for fair comparison.
+    if (getenv('BOOTGLY_PROFILE') === '1' && class_exists(ExcimerProfiler::class)) {
+        $profiler = new ExcimerProfiler;
+        $profiler->setPeriod(0.0001);
+        $profiler->setEventType(EXCIMER_CPU);
+        $profiler->setMaxDepth(64);
+        $profiler->start();
+        register_shutdown_function(function () use ($profiler) {
+            $profiler->stop();
+            $dir = '/tmp/workerman_profile';
+            @mkdir($dir, 0777, true);
+            file_put_contents(
+                $dir . '/worker-' . getmypid() . '.collapsed',
+                $profiler->getLog()->formatCollapsed()
+            );
+        });
+    }
 };
 
 // Static routes

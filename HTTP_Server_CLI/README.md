@@ -38,6 +38,26 @@ Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` and the matching route
 | **Swoole extension** + `pdo_pgsql` | `swoole-techempower` opponent | Only for cross-framework |
 | **FrankenPHP binary** | Phase 2 opponents | Optional |
 
+> **No sudo / no system PostgreSQL?** Start a throwaway local instance — **no `sudo` needed** —
+> with the bundled script:
+>
+> ```bash
+> bash artifacts/@postgresql/postgresql-demo.sh start    # also: stop | restart | status
+> ```
+>
+> It `initdb`s (auth=`trust`, no password) and starts PostgreSQL on `127.0.0.1:5432`, creating the
+> `bootgly` database as role `postgres`. PGDATA lives in `bootgly/workdata/temp/postgresql-demo`.
+>
+> Then run the TechEmpower DB set. **Two env vars** select it — `BOOTGLY_HTTP_SERVER_CLI_LOADS`
+> (runner: which loads + seed) **and** `BOOTGLY_HTTP_SERVER_CLI_ROUTER` (server: which SAPI). Both must
+> be `techempower`, or the loads hit a server still serving the default `bootgly` routes (→ 404):
+>
+> ```bash
+> DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=postgres DB_NAME=bootgly DB_PASS= \
+>   BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+>   ./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly
+> ```
+
 ---
 
 ## 🔧 Installation

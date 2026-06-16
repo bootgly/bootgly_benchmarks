@@ -1,0 +1,3 @@
+# The bench image builds entirely FROM bootgly:full + RUN steps — it COPYs
+# nothing from the build context, so send an empty context (fast builds).
+*

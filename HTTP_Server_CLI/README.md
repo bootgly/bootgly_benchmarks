@@ -289,6 +289,8 @@ supports multi-worker forking and HTTP pipelining.
 |--------|-------------------|------|---------|
 | **Bootgly** HTTP Server CLI | PHP (event-loop) | Baseline | `techempower`, `benchmark` |
 | **Swoole** TechEmpower | PHP (C extension) | PROCESS + PDO pool + `/plaintext` & `/json` | `techempower` |
+| **Laravel** (nginx) | PHP-FPM 8.4 behind nginx | Per-request (no persistent worker), six TechEmpower routes | `techempower` |
+| **Laravel** (Apache) | PHP-FPM 8.4 behind Apache `mpm_event` (`mod_proxy_fcgi`) | Per-request (no persistent worker), six TechEmpower routes | `techempower` |
 | **Workerman** v5 | PHP (event-loop) | Routes | Phase 2 (pending) |
 | **Swoole** (Base mode) | PHP (C extension) | Reactor per worker | Phase 2 (pending) |
 | **Swoole** (Process mode) | PHP (C extension) | Master + workers | Phase 2 (pending) |
@@ -297,13 +299,22 @@ supports multi-worker forking and HTTP pipelining.
 | **FrankenPHP** | Go + PHP (worker mode) | Caddy-based | Phase 2 (pending) |
 | **Hyperf** | PHP (Swoole framework) | Full-stack coroutine | Phase 2 (pending) |
 
-All opponents use `nproc / 2` workers for fair CPU distribution.
+Event-loop opponents use `nproc / 2` workers for fair CPU distribution. The
+**Laravel** opponents are the exception: PHP-FPM is per-request (one child = one
+blocking request), so it runs a fixed static process pool (`FPM_MAX_CHILDREN`,
+default `64`) instead of `nproc / 2`. The pool size also caps concurrent Postgres
+connections, so keep it below the server's `max_connections` (default `100`).
 
-The TechEmpower set currently runs Bootgly against **Swoole TechEmpower** only.
-The other opponents are still registered but serve the pre-split router routes,
-not the TechEmpower routes — their `/plaintext` + `/json` + four-DB-route variants
-are **Phase 2 (pending)**. Running them against the `techempower` set today fails
-preflight (404 on `/plaintext`).
+The TechEmpower set runs Bootgly against **Swoole TechEmpower** and the two
+**Laravel** stacks (`laravel-nginx`, `laravel-apache`), which serve all six
+TechEmpower routes. The remaining opponents are still registered but serve the
+pre-split router routes, not the TechEmpower routes — their `/plaintext` + `/json`
++ four-DB-route variants are **Phase 2 (pending)**. Running those against the
+`techempower` set today fails preflight (404 on `/plaintext`).
+
+> The Laravel stacks run a full framework bootstrap **per request** (no persistent
+> worker) — the mainstream popular deployment. They are expected to score far below
+> the persistent-worker opponents; that contrast is the point of including them.
 
 ### Available names
 
@@ -313,6 +324,8 @@ CLI filter values for `--opponents=`:
 |------|-------------|
 | `bootgly` | Bootgly HTTP Server CLI (always baseline) |
 | `swoole-techempower` | Swoole PROCESS + PDO pool, six TechEmpower routes |
+| `laravel-nginx` | Laravel 13 on PHP-FPM 8.4 behind nginx, six TechEmpower routes (per-request) |
+| `laravel-apache` | Laravel 13 on PHP-FPM 8.4 behind Apache `mpm_event`, six TechEmpower routes (per-request) |
 | `workerman` | Workerman v5 — Phase 2 (pre-split router routes only) |
 | `swoole-base` | Swoole SWOOLE_BASE mode — Phase 2 |
 | `swoole-process` | Swoole SWOOLE_PROCESS mode — Phase 2 |
@@ -320,6 +333,58 @@ CLI filter values for `--opponents=`:
 | `roadrunner` | RoadRunner (Go + PHP) — Phase 2 |
 | `frankenphp` | FrankenPHP worker mode — Phase 2 |
 | `hyperf` | Hyperf (Swoole framework) — Phase 2 |
+
+### Laravel opponents (`laravel-nginx`, `laravel-apache`)
+
+Both variants serve the **same** app (`bootables/laravel/`) fronted by a different
+web server, talking to **PHP-FPM 8.4** over a unix socket. The start script renders
+`configs/*.tpl` into `bootables/laravel/run/` per run (gitignored).
+
+Prerequisites:
+
+```bash
+sudo apt-get install -y php8.4-fpm php8.4-pgsql php8.4-opcache nginx apache2
+# Postgres seeded with the World/Fortune tables:
+bash artifacts/@postgresql/postgresql-demo.sh start
+```
+
+One-time bootable setup (after cloning — `vendor/` and caches are gitignored):
+
+```bash
+cd bootables/laravel
+composer install --no-dev --classmap-authoritative --optimize-autoloader
+php artisan optimize
+```
+
+Tuning knobs (env): `BENCHMARK_PORT` (default `8082`), `FPM_MAX_CHILDREN`
+(default `64`; the static FPM pool size, which also caps concurrent Postgres
+connections — keep below PG `max_connections`), `FPM_JIT` (`tracing` | `function` |
+`off`; default `tracing`). The app reads its DB from `bootables/laravel/.env`
+(committed: localhost Postgres, throwaway `APP_KEY` — no secrets).
+
+#### Performance notes (how these stacks are tuned)
+
+The FPM pool + web-server configs mirror TechEmpower's Laravel reference
+(`opcache.validate_timestamps=0`, `save_comments=0`, `enable_file_override=1`,
+`huge_code_pages=1`, `jit_buffer_size=128M`, `opcache.preload`, classmap-authoritative
+autoloader). The web servers route every request straight to `public/index.php` over
+the FPM socket (no `try_files`/`mod_rewrite` filesystem stat).
+
+- **Xdebug must be off in FPM.** If `xdebug` is enabled in the FPM SAPI it overrides
+  `zend_execute_ex`, force-disabling JIT and adding heavy per-opcode overhead, which
+  cuts Laravel throughput several-fold. The launcher starts FPM with `XDEBUG_MODE=off`
+  to prevent this; verify with `php-fpm8.4 -i | grep xdebug`.
+- **JIT is effectively noise for this stateless per-request workload** (tracing vs off
+  stays within the run-to-run band). The real lever is Xdebug-off + opcache, not JIT.
+- **nginx is the faster front; Apache trails somewhat.** Apache needs a warm thread pool
+  (`StartServers`/`MinSpareThreads`); `mod_proxy_fcgi enablereuse=on` *hurt* (serialized
+  the unix socket) and is left off.
+- **The DB routes (`/db`,`/query`) plateau well below the static routes** — bottlenecked
+  on the per-request Postgres *connect* (Laravel opens a fresh connection each request),
+  not on opcode execution.
+
+Absolute throughput is environment-dependent — run the suite on your own hardware. JIT is
+exposed as `FPM_JIT` precisely so you can confirm the tracing-vs-off result for your box.
 
 ### Adding an opponent
 

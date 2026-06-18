@@ -48,7 +48,7 @@ if (!\defined('BOOTGLY_VERSION')) {
 
 
 use Bootgly\ACI\Events\Timer;
-use Bootgly\ACI\Logs\Logger;
+use Bootgly\ACI\Logs\Data\Display;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI\Events;
 
@@ -132,7 +132,7 @@ if ($connectionsPerWorker > $maxFdsPerWorker) {
 // ---------------------------------------------------------------------------
 // Suppress log output — we only want the JSON result on stdout
 // ---------------------------------------------------------------------------
-Logger::$display = Logger::DISPLAY_NONE;
+Display::show(Display::NONE);
 
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,8 @@ $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 $loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
 
 // ? Explicit set required — this case ships two sets, no silent default.
-if ($loadSet !== 'techempower' && $loadSet !== 'benchmark') {
+//   Skipped under --help (BENCHMARK_HELP), which only needs the Runner options.
+if (getenv('BENCHMARK_HELP') !== '1' && $loadSet !== 'techempower' && $loadSet !== 'benchmark') {
    fwrite(STDERR,
       "HTTP_Server_CLI benchmark: unknown load set '{$loadSet}'.\n"
       . "Pass --loads=<set>:<indexes> with set = techempower | benchmark "

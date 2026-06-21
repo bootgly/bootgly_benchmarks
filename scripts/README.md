@@ -46,13 +46,13 @@ Files without `# Config:` are rejected with a clear error.
 ```bash
 # Server-workers sweep, DB loads — output goes to the case `results/`.
 .venv/bin/python3 chart.py \
-   --marks '../../bootgly/workdata/tests/benchmarks/HTTP_Server_CLI/2026-05-31_*.marks' \
+   --marks '../../bootgly/storage/tests/benchmarks/HTTP_Server_CLI/2026-05-31_*.marks' \
    --out ../HTTP_Server_CLI/results/ \
    --baseline Bootgly
 
 # Specify baseline opponent and force the X axis
 .venv/bin/python3 chart.py \
-   --marks 'workdata/.../*.marks' --out report/ \
+   --marks 'storage/.../*.marks' --out report/ \
    --baseline Bootgly --x-key client-workers
 
 # Override the load-set token used in output filenames

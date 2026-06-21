@@ -23,12 +23,31 @@ match ($action) {
       exec("php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI stop > /dev/null 2>&1");
       usleep(500_000);
 
-      // @ Start server via bootgly project command
+      // ! Server env prefix
       $env = '';
+
+      // # Workers (A/B override)
       $workers = getenv('BOOTGLY_WORKERS');
       if ($workers !== false) {
-         $env = "BOOTGLY_WORKERS={$workers} ";
+         $env .= "BOOTGLY_WORKERS={$workers} ";
       }
+
+      // # Router — derive from the active load set so the server serves exactly
+      //   the routes the client will hit. LOADS (the client's route files) and
+      //   ROUTER (the server's routes) are separate vars; without this link a
+      //   `techempower` run boots the default router and every TechEmpower route
+      //   404s (preflight N/A). An explicit BOOTGLY_HTTP_SERVER_CLI_ROUTER wins.
+      $router = getenv('BOOTGLY_HTTP_SERVER_CLI_ROUTER');
+      if ($router === false) {
+         $loads = strtolower(getenv('BOOTGLY_HTTP_SERVER_CLI_LOADS') ?: 'benchmark');
+         $router = match ($loads) {
+            'techempower' => 'techempower',
+            default       => 'bootgly',
+         };
+      }
+      $env .= "BOOTGLY_HTTP_SERVER_CLI_ROUTER={$router} ";
+
+      // @ Start server via bootgly project command
       exec("{$env}php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI start > /dev/null 2>&1");
    })(),
 

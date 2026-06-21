@@ -131,14 +131,14 @@ values, producing one round per combination.
 All commands run from the **bootgly** directory.
 
 ```bash
-# All loads, the Bootgly baseline
-./bootgly test benchmark UDP_Server_CLI
+# All loads, the Bootgly baseline (single set: default)
+./bootgly test benchmark UDP_Server_CLI --loads=default:*
 
 # Specific load
-./bootgly test benchmark UDP_Server_CLI --loads=1
+./bootgly test benchmark UDP_Server_CLI --loads=default:1
 
 # Custom runner options
-./bootgly test benchmark UDP_Server_CLI --connections=256 --duration=15 --server-workers=8
+./bootgly test benchmark UDP_Server_CLI --loads=default:* --connections=256 --duration=15 --server-workers=8
 ```
 
 ### Global options
@@ -146,7 +146,7 @@ All commands run from the **bootgly** directory.
 | Option | Description |
 |--------|-------------|
 | `--opponents=NAME,...` | Filter opponents by name |
-| `--loads=N,...` | Filter loads by 1-based index |
+| `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`default:*` for all, `default:1,2` to filter) |
 | `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
 
 ---

@@ -14,7 +14,18 @@ $runnerFile = match ($runnerType) {
    default       => ucfirst($runnerType),
 };
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
-$loadSet = strtolower(getenv('BOOTGLY_HTTP_SERVER_CLI_LOADS') ?: 'benchmark');
+// @ Load set — provided by the framework from `--loads=<set>:<indexes>` (BENCHMARK_LOAD_SET).
+$loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
+
+// ? Explicit set required — this case ships two sets, no silent default.
+if ($loadSet !== 'techempower' && $loadSet !== 'benchmark') {
+   fwrite(STDERR,
+      "HTTP_Server_CLI benchmark: unknown load set '{$loadSet}'.\n"
+      . "Pass --loads=<set>:<indexes> with set = techempower | benchmark "
+      . "(e.g. --loads=techempower:* or --loads=benchmark:1,2).\n"
+   );
+   exit(1);
+}
 
 // @ Surface the load set in the .marks Config header so chart tooling
 //   can name outputs by `load-set` without per-tool CLI flags.

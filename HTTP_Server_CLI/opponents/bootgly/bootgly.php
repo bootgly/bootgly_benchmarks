@@ -39,8 +39,8 @@ match ($action) {
       //   404s (preflight N/A). An explicit BOOTGLY_HTTP_SERVER_CLI_ROUTER wins.
       $router = getenv('BOOTGLY_HTTP_SERVER_CLI_ROUTER');
       if ($router === false) {
-         $loads = strtolower(getenv('BOOTGLY_HTTP_SERVER_CLI_LOADS') ?: 'benchmark');
-         $router = match ($loads) {
+         $loadSet = strtolower(getenv('BENCHMARK_LOAD_SET') ?: 'benchmark');
+         $router = match ($loadSet) {
             'techempower' => 'techempower',
             default       => 'bootgly',
          };

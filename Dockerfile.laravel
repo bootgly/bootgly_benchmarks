@@ -13,7 +13,7 @@
 #
 #   docker run --rm bootgly/bootgly_benchmarks:laravel test benchmark \
 #     HTTP_Server_CLI --opponents=bootgly,laravel-nginx,laravel-apache \
-#     --runner=TCP_Client --loads=1
+#     --runner=TCP_Client --loads=techempower:1,2,3,4,5,6
 # ============================================================================
 
 ARG BOOTGLY_FULL_IMAGE=bootgly:full

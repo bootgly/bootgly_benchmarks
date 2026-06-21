@@ -5,7 +5,7 @@ Benchmarks for **Bootgly HTTP Server CLI**, split into two **load sets**:
 - **`techempower`** — the six canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more opponents in Phase 2).
 - **`benchmark`** — a Bootgly-internal stress surface (100 static, 100 dynamic, nested groups, per-route middleware, catch-all, plus DB probes) for **self-comparison during framework development**. Bootgly-only.
 
-Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>`. The Bootgly opponent derives the matching server router automatically; set `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>` only to override it.
+Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` is `techempower` or `benchmark`, `<indexes>` is `*` (all) or a comma list (e.g. `techempower:1,2`). The Bootgly opponent derives the matching server router from the set automatically; set `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>` only to override it.
 
 ---
 
@@ -48,14 +48,12 @@ Select the set with `BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>`. The Bootgly opponent 
 > It `initdb`s (auth=`trust`, no password) and starts PostgreSQL on `127.0.0.1:5432`, creating the
 > `bootgly` database as role `postgres`. PGDATA lives in `bootgly/workdata/temp/postgresql-demo`.
 >
-> Then run the TechEmpower DB set. Select it with `BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower`
-> (runner: which loads + seed); the Bootgly opponent boots the matching `techempower` server SAPI
-> automatically. Set `BOOTGLY_HTTP_SERVER_CLI_ROUTER` only to override that choice:
+> Then run the TechEmpower DB set with `--loads=techempower:*` (the techempower set seeds
+> the tables; the Bootgly opponent boots the matching `techempower` server SAPI automatically):
 >
 > ```bash
 > DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=postgres DB_NAME=bootgly DB_PASS= \
->   BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
->   ./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly
+>   ./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=techempower:*
 > ```
 
 ---
@@ -119,11 +117,11 @@ See: https://frankenphp.dev/docs/install
 
 ## 🎯 Loads
 
-The case ships **two load sets**, selected with
-`BOOTGLY_HTTP_SERVER_CLI_LOADS=<set>` (loads). The Bootgly opponent derives the
-matching server SAPI (`BOOTGLY_HTTP_SERVER_CLI_ROUTER`) from it automatically. A
-*load* is one PHP file under `loads/<set>/` describing a request pattern (method,
-paths, expected response) for the TCP_Client generator.
+The case ships **two load sets**, selected with the required `--loads=<set>:<indexes>`
+option. The Bootgly opponent derives the matching server SAPI
+(`BOOTGLY_HTTP_SERVER_CLI_ROUTER`) from `<set>` automatically. A *load* is one PHP file
+under `loads/<set>/` describing a request pattern (method, paths, expected response)
+for the TCP_Client generator.
 
 ### TechEmpower set (`loads/techempower/`)
 
@@ -213,7 +211,6 @@ comparison:
 Run from the `bootgly` repository — Bootgly only:
 
 ```bash
-BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
 DB_HOST=127.0.0.1 \
 DB_PORT=5432 \
 DB_NAME=bootgly \
@@ -222,13 +219,12 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=techempower:3,4,5,6
 ```
 
 Compare Bootgly with the Swoole TechEmpower opponent:
 
 ```bash
-BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
 DB_HOST=127.0.0.1 \
 DB_PORT=5432 \
 DB_NAME=bootgly \
@@ -237,7 +233,7 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=techempower:3,4,5,6
 ```
 
 The Swoole TechEmpower opponent requires PHP extensions `swoole` and `pdo_pgsql`
@@ -435,8 +431,7 @@ The `name` is used as the CLI filter value (lowercased): `--opponents=myserver`.
 #### 4. Run
 
 ```bash
-BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,myserver
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,myserver --loads=techempower:*
 ```
 
 ---
@@ -445,14 +440,15 @@ BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
 
 ### Router & load set
 
-The active load set is chosen with `BOOTGLY_HTTP_SERVER_CLI_LOADS`. The Bootgly
-opponent derives the matching server SAPI from it, so you normally set only one
-variable; `BOOTGLY_HTTP_SERVER_CLI_ROUTER` is an optional override.
+The active load set is chosen with the **required** `--loads=<set>:<indexes>` option
+(e.g. `techempower:*`, `benchmark:1,8`). The Bootgly opponent derives the matching
+server SAPI from `<set>`, so no env is needed; `BOOTGLY_HTTP_SERVER_CLI_ROUTER` stays
+as an optional override.
 
-| Env var | Values | Default | Selects |
-|---------|--------|---------|---------|
-| `BOOTGLY_HTTP_SERVER_CLI_LOADS` | `techempower`, `benchmark` | `benchmark` | which loads run (`loads/<set>/`) |
-| `BOOTGLY_HTTP_SERVER_CLI_ROUTER` | `techempower`, `bootgly` | derived from `LOADS` | which SAPI the server mounts (override) |
+| Option / Env | Values | Selects |
+|--------------|--------|---------|
+| `--loads=<set>:<indexes>` (required) | set: `techempower` \| `benchmark`; indexes: `*` or `1,2,…` | load set + 1-based loads to run |
+| `BOOTGLY_HTTP_SERVER_CLI_ROUTER` (override) | `techempower`, `bootgly` | which SAPI the server mounts (default: derived from `<set>`) |
 
 PostgreSQL loads also read `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`,
 `DB_SSLMODE`, and `DB_POOL_MAX` (see [Database Benchmark](#database-benchmark)).
@@ -527,12 +523,12 @@ cd /path/to/bootgly
 
 ### Basic usage
 
-With no env vars, the run defaults to the Bootgly-internal `benchmark` set
-(`..._LOADS=benchmark`; the opponent then serves the `bootgly` router) — Bootgly-only:
+The Bootgly-internal `benchmark` set runs Bootgly-only — pass `--loads=benchmark:*` (the
+opponent serves the `bootgly` router automatically):
 
 ```bash
-# Bootgly-internal benchmark set, all loads (default, TCP_Client runner)
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly
+# Bootgly-internal benchmark set, all loads (TCP_Client runner)
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=benchmark:*
 ```
 
 Cross-framework comparison uses the `techempower` set plus a TechEmpower
@@ -541,18 +537,17 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 
 ```bash
 # Bootgly vs Swoole TechEmpower, six TechEmpower routes
-BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --loads=techempower:*
 ```
 
 ### Filtering loads
 
 ```bash
 # Run only load 1 (static single) and 8 (nested 6) of the benchmark set
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=1,8
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=benchmark:1,8
 
 # Run only the 100-route loads (3 and 6)
-./bootgly test benchmark HTTP_Server_CLI --loads=3,6
+./bootgly test benchmark HTTP_Server_CLI --loads=benchmark:3,6
 ```
 
 ### Runner options (TCP_Client)
@@ -577,7 +572,7 @@ BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
 | Option | Description |
 |--------|-------------|
 | `--opponents=NAME,...` | Filter opponents by name |
-| `--loads=N,...` | Filter loads by 1-based index |
+| `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`<set>:*` for all, `<set>:1,2` to filter) |
 | `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
 
 ---
@@ -737,10 +732,9 @@ cd bootgly
 export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
        DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
 for sw in 1 2 4 8 12 24; do
-   BOOTGLY_HTTP_SERVER_CLI_LOADS=techempower \
    php bootgly test benchmark HTTP_Server_CLI \
       --opponents=bootgly,swoole-techempower --runner=tcp_client \
-      --connections=512 --duration=10 --server-workers="$sw" --loads=1,2,3,4,5,6
+      --connections=512 --duration=10 --server-workers="$sw" --loads=techempower:1,2,3,4,5,6
 done
 ```
 
@@ -751,10 +745,9 @@ cd bootgly
 export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
        DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
 for sw in 1 2 4 8 12 24; do
-   BOOTGLY_HTTP_SERVER_CLI_LOADS=benchmark \
    php bootgly test benchmark HTTP_Server_CLI \
       --opponents=bootgly --runner=tcp_client \
-      --connections=512 --duration=10 --server-workers="$sw" --loads=13,14,15,16,17,18,19,20
+      --connections=512 --duration=10 --server-workers="$sw" --loads=benchmark:13,14,15,16,17,18,19,20
 done
 ```
 

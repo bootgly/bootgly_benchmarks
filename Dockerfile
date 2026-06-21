@@ -14,7 +14,7 @@
 #     -t bootgly-bench:swoole .
 #
 #   docker run --rm bootgly-bench:swoole test benchmark HTTP_Server_CLI \
-#     --opponents=bootgly,swoole-base --runner=tcp_client --loads=1
+#     --opponents=bootgly,swoole-base --runner=tcp_client --loads=benchmark:1
 # ============================================================================
 
 ARG BOOTGLY_FULL_IMAGE=bootgly:full

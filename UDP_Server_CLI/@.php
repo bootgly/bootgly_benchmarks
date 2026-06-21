@@ -17,6 +17,16 @@ $runnerFile = match ($runnerType) {
 };
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 
+// ? Load set — explicit `default` required (single-set case, no silent default).
+$loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
+if ($loadSet !== 'default') {
+   fwrite(STDERR,
+      "UDP_Server_CLI benchmark: single load set 'default'. "
+      . "Pass --loads=default:<indexes> (e.g. --loads=default:*).\n"
+   );
+   exit(1);
+}
+
 // @ Configure
 $Runner->port = 8084;
 $Runner->connections = 514;

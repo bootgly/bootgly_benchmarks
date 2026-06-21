@@ -30,6 +30,10 @@ if (!\defined('BOOTGLY_WORKING_BASE')) {
    \define('BOOTGLY_WORKING_BASE', BOOTGLY_ROOT_BASE);
    \define('BOOTGLY_WORKING_DIR', BOOTGLY_ROOT_DIR);
 }
+if (!\defined('BOOTGLY_STORAGE_BASE')) {
+   \define('BOOTGLY_STORAGE_BASE', BOOTGLY_WORKING_DIR . 'storage');
+   \define('BOOTGLY_STORAGE_DIR', BOOTGLY_STORAGE_BASE . \DIRECTORY_SEPARATOR);
+}
 if (!\defined('BOOTGLY_VERSION')) {
    \define('BOOTGLY_VERSION', '0.12.1-beta');
 }

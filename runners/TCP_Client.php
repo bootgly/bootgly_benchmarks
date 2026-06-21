@@ -360,8 +360,22 @@ return new class (
          $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 1);
 
          if ($socket) {
+            // @ Port is open, but that is not enough: a php-fpm opponent (e.g.
+            //   Laravel) may still be preloading behind nginx/Apache, which
+            //   answer 502/503 in the meantime. Probe with a real request and
+            //   only accept it once the app itself responds.
+            stream_set_timeout($socket, 2);
+            fwrite($socket, "GET / HTTP/1.0\r\nHost: 127.0.0.1:{$this->port}\r\nConnection: close\r\n\r\n");
+            $response = fread($socket, 16);
             fclose($socket);
-            return true;
+
+            if (
+               is_string($response)
+               && strncmp($response, 'HTTP/', 5) === 0
+               && preg_match('#^HTTP/\S+ 50[234]#', $response) !== 1
+            ) {
+               return true;
+            }
          }
 
          usleep(250_000);

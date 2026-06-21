@@ -20,6 +20,8 @@ define('BOOTGLY_ROOT_BASE', $bootglyDir);
 define('BOOTGLY_ROOT_DIR', $bootglyDir . DIRECTORY_SEPARATOR);
 define('BOOTGLY_WORKING_BASE', BOOTGLY_ROOT_BASE);
 define('BOOTGLY_WORKING_DIR', BOOTGLY_ROOT_DIR);
+define('BOOTGLY_STORAGE_BASE', BOOTGLY_WORKING_DIR . 'storage');
+define('BOOTGLY_STORAGE_DIR', BOOTGLY_STORAGE_BASE . DIRECTORY_SEPARATOR);
 @include($bootglyDir . '/vendor/autoload.php');
 spl_autoload_register(function (string $class) {
    $file = implode('/', explode('\\', $class)) . '.php';

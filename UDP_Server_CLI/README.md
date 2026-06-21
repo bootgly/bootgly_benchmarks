@@ -43,7 +43,7 @@ git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
 Nothing else to install — the Bootgly opponent boots through the
-`bootgly project Benchmark --UDP_Server_CLI` command.
+`bootgly project Benchmark/UDP_Server_CLI` command.
 
 ---
 
@@ -51,7 +51,7 @@ Nothing else to install — the Bootgly opponent boots through the
 
 A *load* is one PHP file under `loads/` defining a single **datagram payload**. The
 server echoes every received datagram back to the sender verbatim. The handler
-registered in `Benchmark.project.php` is a plain echo:
+registered in `Benchmark/UDP_Server_CLI/UDP_Server_CLI.project.php` is a plain echo:
 
 ```php
 static function (string $input): string { return $input; }

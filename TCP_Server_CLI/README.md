@@ -43,7 +43,7 @@ git clone https://github.com/bootgly/bootgly_benchmarks.git
 ```
 
 Nothing else to install — the Bootgly opponent boots through the
-`bootgly project Benchmark --TCP_Server_CLI` command.
+`bootgly project Benchmark/TCP_Server_CLI` command.
 
 ---
 

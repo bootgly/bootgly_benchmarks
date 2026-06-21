@@ -12,8 +12,14 @@
 namespace BootglyBenchmarks\HTTP_Server_CLI\Probes;
 
 
+use const BOOTGLY_ROOT_BASE;
+use const BOOTGLY_ROOT_DIR;
+use const BOOTGLY_STORAGE_BASE;
+use const BOOTGLY_WORKING_DIR;
 use const DIRECTORY_SEPARATOR;
+use const GET;
 use const PHP_BINARY;
+use const PHP_EOL;
 use const STDOUT;
 use function ceil;
 use function define;
@@ -29,8 +35,8 @@ use function file_put_contents;
 use function fread;
 use function fwrite;
 use function getenv;
-use function is_numeric;
 use function is_file;
+use function is_numeric;
 use function is_resource;
 use function json_encode;
 use function microtime;
@@ -44,16 +50,18 @@ use function shell_exec;
 use function spl_autoload_register;
 use function sprintf;
 use function str_contains;
-use function strlen;
 use function str_replace;
 use function stream_select;
 use function stream_set_blocking;
 use function stream_socket_client;
+use function strlen;
 use function strtolower;
 use function sys_get_temp_dir;
 use function trim;
 use function unlink;
 use function usleep;
+use RuntimeException;
+use Throwable;
 
 use Bootgly\ADI\Databases\SQL;
 use Bootgly\ADI\Databases\SQL\Config as SQLConfig;
@@ -64,8 +72,6 @@ use Bootgly\WPI\Nodes\HTTP_Server_CLI\Request;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response\Resources\Database as DatabaseResource;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Router;
-use RuntimeException;
-use Throwable;
 
 
 $BenchmarksRoot = dirname(__DIR__, 2);
@@ -113,6 +119,11 @@ function probe_bootstrap (string $Root): void
    if (defined('BOOTGLY_WORKING_BASE') === false) {
       define('BOOTGLY_WORKING_BASE', BOOTGLY_ROOT_BASE);
       define('BOOTGLY_WORKING_DIR', BOOTGLY_ROOT_DIR);
+   }
+
+   if (defined('BOOTGLY_STORAGE_BASE') === false) {
+      define('BOOTGLY_STORAGE_BASE', BOOTGLY_WORKING_DIR . 'storage');
+      define('BOOTGLY_STORAGE_DIR', BOOTGLY_STORAGE_BASE . DIRECTORY_SEPARATOR);
    }
 
    if (defined('BOOTGLY_VERSION') === false) {

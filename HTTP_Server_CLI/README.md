@@ -741,9 +741,13 @@ command, per-load tables, ratio chart, peaks). Results live under
 
 ![Bootgly vs Swoole — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/swoole/RESULTS-techempower-2026-06-22_172346.chart.throughput.png)
 
+![Bootgly vs Swoole — TechEmpower latency](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/swoole/RESULTS-techempower-2026-06-22_172346.chart.latency.png)
+
 **Hyperf** — [report](results/hyperf/RESULTS-techempower-2026-06-24_103419.md)
 
 ![Bootgly vs Hyperf — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-06-24_103419.chart.throughput.png)
+
+![Bootgly vs Hyperf — TechEmpower latency](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-06-24_103419.chart.latency.png)
 
 **ReactPHP** — [report](results/reactphp/RESULTS-techempower-2026-06-25_161542.md)
 

@@ -2,12 +2,13 @@
 """Generate trend report and charts from a range of Bootgly .bench.marks files.
 
 Parses .marks files (with the `# Config:` header introduced in Bootgly
-v0.16-beta), groups results by opponent + load, and renders three files
+v0.16-beta), groups results by opponent + load, and renders four files
 keyed by the load set and current timestamp:
 
     RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.md
     RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.throughput.png
     RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.ratio.png
+    RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.latency.png
 
 The X axis is auto-detected: among the config keys present in every input file
 (`server-workers`, `client-workers`, `connections`, `duration`, `pipeline`),
@@ -44,6 +45,12 @@ from matplotlib.ticker import FuncFormatter
 
 # Integer tick labels with thousands separators (no decimals / no 1e6 offset).
 _INT_TICKS = FuncFormatter(lambda v, _: f"{int(round(v)):,}")
+
+# Latency tick labels: integer-with-separators at/above 1 ms, compact decimals below
+# (so sub-millisecond decades like 0.1 / 0.5 keep their value instead of rounding to 0).
+_LAT_TICKS = FuncFormatter(
+    lambda v, _: "" if v <= 0 else (f"{v:,.0f}" if v >= 1 else f"{v:g}")
+)
 
 CONFIG_LINE = re.compile(r"^#\s{3}([a-zA-Z][\w-]*):\s*(.+?)\s*$")
 RESULT_LINE = re.compile(r"^\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
@@ -113,12 +120,38 @@ def _load_title(label: str) -> str:
 # Parsing
 # ----------------------------------------------------------------------------
 
+def _parse_latency_ms(token: str) -> float | None:
+    """Normalize a latency token to milliseconds.
+
+    Accepts microseconds (`us` / `µs`), milliseconds (`ms`) or seconds (`s`)
+    and returns the value in ms (us -> /1000, ms -> as-is, s -> *1000). Commas
+    are stripped as thousands separators; the dot stays the decimal point.
+    Returns None for `N/A` or anything that does not parse.
+    """
+    if token == "N/A":
+        return None
+    m = re.match(r"^([\d.,]+)(µs|us|ms|s)$", token)
+    if m is None:
+        return None
+    try:
+        value = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    unit = m.group(2)
+    if unit in ("us", "µs"):
+        return value / 1000.0
+    if unit == "s":
+        return value * 1000.0
+    return value  # already in milliseconds
+
+
 def parse_marks(path: Path) -> dict:
-    """Parse one .marks file into {'benchmark', 'date', 'config', 'results'}."""
+    """Parse one .marks file into {'benchmark', 'date', 'config', 'results', 'latencies'}."""
     benchmark = ""
     date = ""
     config: dict[str, str] = {}
     results: dict[tuple[str, str], int | None] = {}
+    latencies: dict[tuple[str, str], float | None] = {}
 
     for raw in path.read_text().splitlines():
         line = raw.rstrip()
@@ -146,9 +179,15 @@ def parse_marks(path: Path) -> dict:
                 if k == "rps":
                     rps = None if v == "N/A" else int(v.replace(",", "").replace(".", ""))
                     break
+            latency_ms: float | None = None
+            for k, v in KV.findall(m.group(3)):
+                if k == "latency":
+                    latency_ms = _parse_latency_ms(v)
+                    break
             results[(opponent, load)] = rps
+            latencies[(opponent, load)] = latency_ms
 
-    return {"benchmark": benchmark, "date": date, "config": config, "results": results}
+    return {"benchmark": benchmark, "date": date, "config": config, "results": results, "latencies": latencies}
 
 
 def detect_x_key(parsed: list[dict], override: str | None) -> str:
@@ -244,6 +283,49 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponen
             # Plain integer ticks (e.g. 1,000,000) instead of 0.2 … ×1e6.
             ax.ticklabel_format(style="plain", axis="y")
             ax.yaxis.set_major_formatter(_INT_TICKS)
+
+    for k in range(n, rows * cols):
+        axes[k // cols][k % cols].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_latency(path: Path, title: str, x_key: str, x_values, loads, opponents, data_latency, yscale="log"):
+    n = len(loads)
+    if n <= 1:
+        cols = 1
+    elif n <= 4:
+        cols = 2
+    else:
+        cols = 3
+    rows = (n + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(6.0 * cols, 4.2 * rows), squeeze=False)
+    fig.suptitle(title, fontsize=14, fontweight="bold")
+
+    for i, load in enumerate(loads):
+        ax = axes[i // cols][i % cols]
+        for j, c in enumerate(opponents):
+            ys = [float(v) if v is not None else None for v in data_latency[load][c]]
+            color = OPPONENT_COLORS[j % len(OPPONENT_COLORS)]
+            ax.plot(x_values, ys, marker="o", linewidth=2, color=color, label=c)
+        ax.set_title(_load_title(load), fontsize=11)
+        ax.set_xlabel(x_key)
+        ax.set_ylabel("Latency (ms) — lower is better")
+        ax.grid(True, alpha=0.3)
+        # Lower is better -> fast runs sit near the bottom; keep the legend up top.
+        ax.legend(loc="upper right", fontsize=9)
+        if yscale == "log":
+            ax.set_yscale("log")
+            # Decade labels as plain numbers (0.1 / 1 / 10 / 100 / 1,000), never 0.
+            ax.yaxis.set_major_formatter(_LAT_TICKS)
+            ax.yaxis.set_minor_formatter(plt.NullFormatter())
+        else:
+            ax.set_ylim(bottom=0)
+            ax.ticklabel_format(style="plain", axis="y")
+            ax.yaxis.set_major_formatter(_LAT_TICKS)
 
     for k in range(n, rows * cols):
         axes[k // cols][k % cols].set_visible(False)
@@ -621,6 +703,14 @@ def main() -> int:
             for c in opponents:
                 data[s][c].append(p["results"].get((c, s)))
 
+    data_latency: dict[str, dict[str, list[float | None]]] = {
+        s: {c: [] for c in opponents} for s in loads
+    }
+    for p in parsed:
+        for s in loads:
+            for c in opponents:
+                data_latency[s][c].append(p["latencies"].get((c, s)))
+
     baseline = args.baseline or sorted(opponents)[0]
     if baseline not in opponents:
         raise SystemExit(f"--baseline '{baseline}' not present in results. Available: {opponents}")
@@ -639,12 +729,14 @@ def main() -> int:
 
     chart_throughput_name = f"{base_name}.chart.throughput.png"
     chart_ratio_name = f"{base_name}.chart.ratio.png"
+    chart_latency_name = f"{base_name}.chart.latency.png"
     report_name = f"{base_name}.md"
 
     title = args.title or f"{case} — {load_set} sweep over {x_key}"
 
     plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, opponents, data, yscale=args.yscale)
     plot_ratio(out_dir / chart_ratio_name, title, x_key, x_values, loads, opponents, data, baseline)
+    plot_latency(out_dir / chart_latency_name, f"{title} — latency", x_key, x_values, loads, opponents, data_latency, yscale="log")
     write_report(
         out_dir / report_name,
         chart_throughput_name,
@@ -666,6 +758,7 @@ def main() -> int:
     print(f"  {out_dir / report_name}")
     print(f"  {out_dir / chart_throughput_name}")
     print(f"  {out_dir / chart_ratio_name}")
+    print(f"  {out_dir / chart_latency_name}")
     return 0
 
 

@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# bootgly-reactphp — ReactPHP opponent (pure-PHP async event-loop HTTP server)
+#
+# Runs the ReactPHP bootable for the Bootgly HTTP_Server_CLI benchmark. This
+# opponent only serves the TechEmpower route set (PostgreSQL TFB loads) via
+# reactphp-techempower.php, and starts it in the FOREGROUND (no daemonize — the
+# CONTAINER is the daemon; daemonizing would make the container exit at once).
+#
+# No pdo_pgsql / libpq: the async PostgreSQL client (voryx/pgasync) is pure PHP
+# and speaks the wire protocol over a TCP socket. pcntl is built in-image (the
+# bootable forks one worker per BOOTGLY_WORKERS) and sockets is built too
+# (React / PgAsync stream transport). composer `install --no-dev` vendors
+# react/http, react/socket, react/promise and voryx/pgasync in-image.
+#
+# Build context = the ReactPHP bootable dir (so `COPY . /app` ships the app):
+#   docker build -f Dockerfile.reactphp -t bootgly-reactphp \
+#     HTTP_Server_CLI/bootables/reactphp
+#
+# Run (host network so it binds :8082 directly and reaches host PostgreSQL at
+# 127.0.0.1:5432 — fair, no NAT):
+#   docker run -d --network host \
+#     -e BOOTGLY_WORKERS=15 \
+#     -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_NAME=bootgly \
+#     -e DB_USER=postgres -e DB_PASS= \
+#     --name bench-reactphp bootgly-reactphp
+# ============================================================================
+
+FROM php:8.4-cli-bookworm
+
+# ! pcntl (the bootable forks BOOTGLY_WORKERS children) + sockets (React /
+#   PgAsync stream transport). git + unzip are needed by composer to vendor the
+#   ReactPHP + PgAsync packages; they are purged after composer install below.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends git unzip; \
+    docker-php-ext-install -j"$(nproc)" pcntl sockets
+
+# ! Composer (build-time) to vendor react/http, react/socket, react/promise and
+#   voryx/pgasync.
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ! ReactPHP bootable (build context = the bootable dir). The host vendor/ and
+#   logs are excluded via Dockerfile.reactphp.dockerignore; vendor is rebuilt.
+WORKDIR /app
+COPY . /app
+RUN set -eux; \
+    composer install --no-interaction --no-progress --no-dev; \
+    apt-get purge -y git unzip; \
+    rm -rf /var/lib/apt/lists/* /root/.composer
+
+# ! Entrypoint: run the async TechEmpower server in the FOREGROUND (no
+#   daemonize — the container is the daemon).
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'exec php reactphp-techempower.php' \
+  > /entrypoint.sh && chmod +x /entrypoint.sh
+
+EXPOSE 8082
+ENTRYPOINT ["/entrypoint.sh"]

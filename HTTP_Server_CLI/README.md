@@ -289,6 +289,8 @@ supports multi-worker forking and HTTP pipelining.
 | **Workerman** v5 | PHP (event-loop), sync per-worker PDO | 7 | `bootgly-workerman` |
 | **RoadRunner** | Go + PHP (goridge), PSR-7 worker, per-worker PDO | 7 | `bootgly-roadrunner` |
 | **FrankenPHP** | Go + PHP worker mode (Caddy-based), per-worker PDO | 7 | `bootgly-frankenphp` |
+| **ReactPHP** | PHP (pure-async event loop), fork N + `SO_REUSEPORT`, async PG via `voryx/pgasync` | 7 | `bootgly-reactphp` |
+| **AMPHP** | PHP (Amp v3 fibers, pure-async), fork N + `SO_REUSEPORT`, async PG via `amphp/postgres` | 7 | `bootgly-amphp` |
 | **Laravel** (nginx) | PHP-FPM 8.4 behind nginx, per-request | 6 (no `/cached-queries`) | `bootgly-laravel-nginx` |
 | **Laravel** (Apache) | PHP-FPM 8.4 behind Apache `mpm_event`, per-request | 6 (no `/cached-queries`) | `bootgly-laravel-apache` |
 | **Laravel** (Octane) | Laravel Octane on Swoole, persistent workers | 6 (no `/cached-queries`) | `bootgly-laravel-octane` |
@@ -302,7 +304,7 @@ connections, so keep it below the server's `max_connections` (default `100`).
 
 Every cross-framework opponent now serves the TechEmpower routes via Docker. The
 persistent-worker opponents — `swoole-base`, `swoole-techempower`, `hyperf`,
-`workerman`, `roadrunner`, `frankenphp` — implement all **seven** TechEmpower routes
+`workerman`, `roadrunner`, `frankenphp`, `reactphp`, `amphp` — implement all **seven** TechEmpower routes
 (including `/cached-queries`). The four **Laravel** stacks (`laravel-nginx`,
 `laravel-apache`, `laravel-octane`, `laravel-ols`) serve **six** (see below). The
 `swoole-process` and `swoole-coroutine` variants remain **generic-route mode demos** —
@@ -313,7 +315,7 @@ they serve the generic route set, not the TechEmpower routes, so they are not pa
 > **N/A** for Laravel. The four Laravel variants share one app, and PHP-FPM (nginx,
 > Apache) is per-request: a fresh worker per request cannot hold an in-process cache, so
 > a `/cached-queries` route there would be meaningless. The persistent-worker opponents
-> (swoole, hyperf, workerman, roadrunner, frankenphp) do implement all seven.
+> (swoole, hyperf, workerman, roadrunner, frankenphp, reactphp, amphp) do implement all seven.
 
 > The Laravel stacks run a full framework bootstrap **per request** (no persistent
 > worker) — the mainstream popular deployment. They are expected to score far below
@@ -337,6 +339,8 @@ CLI filter values for `--opponents=`:
 | `workerman` | Workerman v5, sync per-worker PDO (image `bootgly-workerman`) — all 7 routes |
 | `roadrunner` | RoadRunner (Go + PHP), PSR-7 worker, per-worker PDO (image `bootgly-roadrunner`) — all 7 routes |
 | `frankenphp` | FrankenPHP worker mode, per-worker PDO (image `bootgly-frankenphp`, base `dunglas/frankenphp:php8.4`) — all 7 routes |
+| `reactphp` | ReactPHP pure-async event loop, fork N + `SO_REUSEPORT`, async PG via `voryx/pgasync` (image `bootgly-reactphp`) — all 7 routes |
+| `amphp` | AMPHP (Amp v3 fibers) pure-async, fork N + `SO_REUSEPORT`, async PG via `amphp/postgres` (image `bootgly-amphp`) — all 7 routes |
 | `laravel-nginx` | Laravel on PHP-FPM 8.4 behind nginx, per-request (image `bootgly-laravel-nginx`) — 6 routes (no `/cached-queries`) |
 | `laravel-apache` | Laravel on PHP-FPM 8.4 behind Apache `mpm_event`, per-request (image `bootgly-laravel-apache`) — 6 routes (no `/cached-queries`) |
 | `laravel-octane` | Laravel Octane on Swoole, persistent workers (image `bootgly-laravel-octane`) — 6 routes (no `/cached-queries`) |

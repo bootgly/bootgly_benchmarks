@@ -1,0 +1,8 @@
+{
+    "require": {
+        "react/http": "^1",
+        "react/socket": "^1",
+        "react/promise": "^3",
+        "voryx/pgasync": "^3 || ^2"
+    }
+}

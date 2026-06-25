@@ -1,0 +1,8 @@
+{
+    "require": {
+        "amphp/http-server": "^3",
+        "amphp/postgres": "^2",
+        "amphp/socket": "^2",
+        "revolt/event-loop": "^1"
+    }
+}

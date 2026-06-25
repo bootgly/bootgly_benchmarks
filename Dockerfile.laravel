@@ -48,7 +48,7 @@ RUN set -eux; \
 #   run/log dirs nginx/apache/php-fpm/postgres write to.
 RUN set -eux; \
     useradd -m -u 1000 bench; \
-    mkdir -p /bootgly/workdata/pg /var/lib/nginx /var/log/nginx /var/log/apache2 /var/run/apache2; \
+    mkdir -p /bootgly/storage/pg /var/lib/nginx /var/log/nginx /var/log/apache2 /var/run/apache2; \
     chown -R bench:bench /bootgly /bootgly_benchmarks /var/lib/nginx /var/log/nginx /var/log/apache2 /var/run/apache2
 
 # * DB wiring — one role (postgres) + db (bootgly) over loopback, trust auth.
@@ -57,7 +57,7 @@ ENV PGUSER=postgres \
     PGDATABASE=bootgly \
     PGHOST=127.0.0.1 \
     PGPORT=5432 \
-    PGDATA=/bootgly/workdata/pg \
+    PGDATA=/bootgly/storage/pg \
     DB_HOST=127.0.0.1 \
     DB_PORT=5432 \
     DB_NAME=bootgly \

@@ -20,7 +20,7 @@ The load-set token comes from the marks `# Config: load-set` key
 override; defaults to `default` if neither marks nor CLI supplies one.
 
 Usage:
-    chart.py --marks 'workdata/.../*.marks' --out OUTPUT_DIR \\
+    chart.py --marks 'storage/.../*.marks' --out OUTPUT_DIR \\
              [--baseline OPPONENT] [--x-key KEY] [--load-set NAME] \\
              [--title TITLE]
 """
@@ -40,6 +40,10 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
+# Integer tick labels with thousands separators (no decimals / no 1e6 offset).
+_INT_TICKS = FuncFormatter(lambda v, _: f"{int(round(v)):,}")
 
 CONFIG_LINE = re.compile(r"^#\s{3}([a-zA-Z][\w-]*):\s*(.+?)\s*$")
 RESULT_LINE = re.compile(r"^\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
@@ -72,6 +76,7 @@ LOAD_ANNOTATIONS: dict[str, tuple[str, str]] = {
     "Database multiple queries": ("/query",    "20 SELECTs"),
     "Database fortunes":         ("/fortunes", "HTML render"),
     "Database updates":          ("/updates",  "20 SELECTs + UPDATE"),
+    "Cached queries":            ("/cached-queries", "20 cached rows"),
     # Bootgly-internal DB probes (native = wire driver, resource = ADI runner).
     "Database micro query":            ("/database/native/ping",         "native SELECT 1"),
     "Database resource query":         ("/database/resource/ping",       "resource SELECT 1"),
@@ -205,7 +210,7 @@ def detect_environment(opponents: list[str]) -> dict[str, str]:
 # Charts
 # ----------------------------------------------------------------------------
 
-def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponents, data):
+def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponents, data, yscale="linear"):
     n = len(loads)
     if n <= 1:
         cols = 1
@@ -229,7 +234,16 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponen
         ax.set_ylabel("Requests / second")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="lower right", fontsize=9)
-        ax.set_ylim(bottom=0)
+        if yscale == "log":
+            ax.set_yscale("log")
+            # Decade labels as integers (10,000 / 100,000) instead of 10^n.
+            ax.yaxis.set_major_formatter(_INT_TICKS)
+            ax.yaxis.set_minor_formatter(plt.NullFormatter())
+        else:
+            ax.set_ylim(bottom=0)
+            # Plain integer ticks (e.g. 1,000,000) instead of 0.2 … ×1e6.
+            ax.ticklabel_format(style="plain", axis="y")
+            ax.yaxis.set_major_formatter(_INT_TICKS)
 
     for k in range(n, rows * cols):
         axes[k // cols][k % cols].set_visible(False)
@@ -312,13 +326,6 @@ def _fmt_x(v) -> str:
 
 def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared: dict[str, str], opponents: list[str], loads: list[str]) -> str:
     """Best-effort `for`-loop reproducing the sweep."""
-    env_pairs: list[str] = []
-
-    # # Case-specific env vars (currently only HTTP_Server_CLI's load set).
-    if case == "HTTP_Server_CLI" and load_set and load_set != "router":
-        env_pairs.append(f"BOOTGLY_HTTP_SERVER_CLI_ROUTER={load_set}")
-        env_pairs.append(f"BOOTGLY_HTTP_SERVER_CLI_LOADS={load_set}")
-
     flag_lines: list[str] = []
     if "runner" in shared:
         flag_lines.append(f"--runner={shared['runner']}")
@@ -345,18 +352,13 @@ def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared
 
     lines = ["```bash", f"for {loop_var} in {x_range}; do"]
 
-    if env_pairs:
-        first, *rest = env_pairs
-        lines.append(f"   env {first} \\")
-        for ev in rest:
-            lines.append(f"       {ev} \\")
-
     lines.append(f"   php bootgly test benchmark {case} \\")
     lines.append(f"      --opponents={opponents_csv} \\")
     for fl in flag_lines[:-1]:
         lines.append(f"      {fl} \\")
     lines.append(f"      {flag_lines[-1]} \\")
-    lines.append(f"      --loads=<IDS>  # loads in this sweep: {', '.join(loads)}")
+    loads_arg = f"{load_set}:<IDS>" if load_set and load_set != "default" else "<IDS>"
+    lines.append(f"      --loads={loads_arg}  # loads in this sweep: {', '.join(loads)}")
     lines.append("done")
     lines.append("```")
 
@@ -421,9 +423,31 @@ def write_report(
         ("Duration", "duration"),
         ("Client workers", "client-workers"),
         ("Pipeline", "pipeline"),
+        ("DB pool max", "db-pool-max"),
     ):
         if key in shared:
             lines.append(f"- **{label}** — `{shared[key]}`")
+    if "db-pool-max" in shared:
+        pool = shared["db-pool-max"]
+        pooled = [c for c in opponents if "laravel" not in c.lower()]
+        laravel = [c for c in opponents if "laravel" in c.lower()]
+        note = (
+            f"> **Equal per-worker DB connection — pool = `{pool}` for every framework.** "
+            f"{', '.join(pooled)} inherit `DB_POOL_MAX={pool}` from the runner environment, so each "
+            f"worker holds at most {pool} PostgreSQL connection(s)."
+        )
+        if laravel:
+            note += (
+                f" {', '.join(laravel)} runs PHP-FPM with `pm.max_children = server-workers`, so each "
+                "FPM child also opens exactly one connection — matching the pooled servers' "
+                "per-worker footprint."
+            )
+        note += (
+            f" Every opponent therefore presents the same database footprint at each point "
+            f"(`server-workers` connections total), so no framework gets a connection-count advantage."
+        )
+        lines.append("")
+        lines.append(note)
     lines.append("")
 
     # ## Command
@@ -545,6 +569,7 @@ def main() -> int:
     ap.add_argument("--x-key", dest="x_key", default=None, help="Force X axis to this config key.")
     ap.add_argument("--load-set", dest="load_set", default=None, help="Override load-set token used in output filenames (default: from marks Config or 'default').")
     ap.add_argument("--title", default=None, help="Optional report title (defaults to case + sweep summary).")
+    ap.add_argument("--yscale", default="linear", choices=["linear", "log"], help="Throughput Y axis scale (default: linear). Use 'log' when opponents differ by orders of magnitude.")
 
     args = ap.parse_args()
 
@@ -618,7 +643,7 @@ def main() -> int:
 
     title = args.title or f"{case} — {load_set} sweep over {x_key}"
 
-    plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, opponents, data)
+    plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, opponents, data, yscale=args.yscale)
     plot_ratio(out_dir / chart_ratio_name, title, x_key, x_values, loads, opponents, data, baseline)
     write_report(
         out_dir / report_name,

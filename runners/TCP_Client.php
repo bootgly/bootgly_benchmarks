@@ -33,6 +33,14 @@ return new class (
    public int $workers = 0;
    public int $pipeline = 1;
    public int $preflightTimeout = 3;
+   // # preflight retry — a measured load leaves the server (esp. blocking
+   //   nginx+PHP-FPM) draining its 514-connection backlog; the next load's
+   //   preflight can hit that congestion and read-timeout. Retry with a
+   //   recovery pause so a transient "could not read response" does not turn a
+   //   working route into N/A. Adaptive: fast async servers pass on attempt 1
+   //   (no delay); slow servers drain and pass on a later attempt.
+   public int $preflightRetries = 5;
+   public int $preflightRecovery = 2;
    // # warmup
    public int $warmupDuration = 2;
    public int $warmupConnections = 64;
@@ -83,6 +91,14 @@ return new class (
       $this->meta['duration']       = $this->duration;
       $this->meta['client-workers'] = $this->workers;
       $this->meta['pipeline']       = $this->pipeline;
+
+      // # Database pool ceiling — identical for every opponent. Both Bootgly and
+      //   Swoole inherit DB_POOL_MAX from the runner environment, so recording it
+      //   in the .marks header proves the pool was the same on both sides.
+      $poolMax = getenv('DB_POOL_MAX');
+      if ($poolMax !== false && $poolMax !== '' && is_numeric($poolMax)) {
+         $this->meta['db-pool-max'] = (int) $poolMax;
+      }
    }
    public function options (): array
    {
@@ -471,7 +487,16 @@ return new class (
          return new Result();
       }
 
+      // @ Preflight with recovery retries — the previous load's 514-connection
+      //   run may still be draining; a blocking server (nginx+PHP-FPM) needs a
+      //   moment before the next route responds. Retry before declaring N/A.
       $preflight = $this->preflight($loadData);
+
+      for ($try = 1; $try <= $this->preflightRetries && $preflight !== ''; $try++) {
+         echo "      Preflight retry {$try}/{$this->preflightRetries} ({$preflight})\n";
+         sleep($this->preflightRecovery);
+         $preflight = $this->preflight($loadData);
+      }
 
       if ($preflight !== '') {
          echo "      Preflight failed: {$preflight}\n";

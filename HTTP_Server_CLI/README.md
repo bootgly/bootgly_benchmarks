@@ -2,7 +2,7 @@
 
 Benchmarks for **Bootgly HTTP Server CLI**, split into two **load sets**:
 
-- **`techempower`** — the six canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more opponents in Phase 2).
+- **`techempower`** — the seven canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`, `/cached-queries`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more opponents in Phase 2).
 - **`benchmark`** — a Bootgly-internal stress surface (100 static, 100 dynamic, nested groups, per-route middleware, catch-all, plus DB probes) for **self-comparison during framework development**. Bootgly-only.
 
 Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` is `techempower` or `benchmark`, `<indexes>` is `*` (all) or a comma list (e.g. `techempower:1,2`). The Bootgly opponent derives the matching server router from the set automatically; set `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>` only to override it.
@@ -33,8 +33,8 @@ Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` 
 | **lsof** | Port detection | ✅ |
 | **curl** | Server readiness check | ✅ |
 | **nproc** | CPU count detection | ✅ |
-| **PostgreSQL** | DB loads (`/db`, `/query`, `/fortunes`, `/updates`) + Probes | Only for DB loads |
-| **psql** | Seeds the TechEmpower tables + Probe control query | Only for DB loads |
+| **PostgreSQL** | DB loads (`/db`, `/query`, `/fortunes`, `/updates`, `/cached-queries`) + Probes | Only for DB loads |
+| **psql** | Seeds the TechEmpower tables (`World`, `Fortune`, `CachedWorld`) + Probe control query | Only for DB loads |
 | **Swoole extension** + `pdo_pgsql` | `swoole-techempower` opponent | Only for cross-framework |
 | **FrankenPHP binary** | Phase 2 opponents | Optional |
 
@@ -46,7 +46,7 @@ Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` 
 > ```
 >
 > It `initdb`s (auth=`trust`, no password) and starts PostgreSQL on `127.0.0.1:5432`, creating the
-> `bootgly` database as role `postgres`. PGDATA lives in `bootgly/workdata/temp/postgresql-demo`.
+> `bootgly` database as role `postgres`. PGDATA lives in `bootgly/storage/temp/postgresql-demo`.
 >
 > Then run the TechEmpower DB set with `--loads=techempower:*` (the techempower set seeds
 > the tables; the Bootgly opponent boots the matching `techempower` server SAPI automatically):
@@ -125,7 +125,7 @@ for the TCP_Client generator.
 
 ### TechEmpower set (`loads/techempower/`)
 
-Six canonical TechEmpower routes, identical across opponents. Backed by
+Seven canonical TechEmpower routes, identical across opponents. Backed by
 `projects/Benchmark/HTTP_Server_CLI/router/techempower-benchmark.SAPI.php`.
 
 | # | File | Route | Description |
@@ -136,6 +136,7 @@ Six canonical TechEmpower routes, identical across opponents. Backed by
 | 4 | `1.0.4-query` | `GET /query?queries=20` | Pipeline 20 random `World` fetches |
 | 5 | `1.0.5-fortunes` | `GET /fortunes` | Fortune list rendered as HTML |
 | 6 | `1.0.6-updates` | `GET /updates?queries=20` | 20 random `World` reads + batched UPDATE |
+| 7 | `1.0.7-cached-queries` | `GET /cached-queries?count=20` | 20 random `CachedWorld` rows from an in-memory cache |
 
 All loads tagged `@opponents: all` — cross-framework fair comparison.
 
@@ -183,9 +184,9 @@ stays Bootgly-only.
 
 ### Database Benchmark
 
-The cross-framework database comparison is the `techempower` set's four DB routes
-(loads `3,4,5,6`). They are neutral across opponents and run against Bootgly and
-**Swoole TechEmpower**:
+The cross-framework data comparison is the `techempower` set's four DB routes plus
+the cached-queries route (loads `3,4,5,6,7`). They are neutral across opponents and
+run against Bootgly and **Swoole TechEmpower**:
 
 | Route | Purpose |
 |-------|---------|
@@ -193,6 +194,7 @@ The cross-framework database comparison is the `techempower` set's four DB route
 | `/query?queries=20` | Fetch 20 random `World` rows |
 | `/fortunes` | Fetch, append, sort, escape, and render `Fortune` rows |
 | `/updates?queries=20` | Fetch and update 20 random `World` rows |
+| `/cached-queries?count=20` | Fetch 20 random `CachedWorld` rows from an in-memory cache (primed from DB) |
 
 The Bootgly `benchmark` set additionally ships `SELECT 1`, parameterized,
 multi-query, and `pg_sleep` probes (loads `13–20`). They isolate DBAL/resource
@@ -400,10 +402,10 @@ listen on `getenv('PORT')`, use `getenv('WORKERS')` for worker count).
 
 #### 2. Create the server artifact
 
-Create `bootables/myserver/` serving the six TechEmpower routes so the opponent
+Create `bootables/myserver/` serving the seven TechEmpower routes so the opponent
 joins the cross-framework `techempower` set:
 
-- `/plaintext`, `/json`, `/db`, `/query?queries=N`, `/fortunes`, `/updates?queries=N`
+- `/plaintext`, `/json`, `/db`, `/query?queries=N`, `/fortunes`, `/updates?queries=N`, `/cached-queries?count=N`
 - See `bootables/swoole/swoole-techempower-postgres.php` for the reference implementation.
 
 #### 3. Self-register via `opponents/myserver/@.php`

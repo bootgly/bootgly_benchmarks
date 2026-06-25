@@ -11,6 +11,19 @@ SELECT x.id, least(floor(random() * 10000 + 1), 10000)
 FROM generate_series(1, 10000) AS x(id)
 WHERE NOT EXISTS (SELECT 1 FROM World);
 
+-- TechEmpower "Caching" test: a distinct table with the World schema, primed
+-- into an in-memory cache by the framework (never read from disk under load).
+CREATE TABLE IF NOT EXISTS CachedWorld (
+   id integer NOT NULL,
+   randomNumber integer NOT NULL DEFAULT 0,
+   PRIMARY KEY (id)
+);
+
+INSERT INTO CachedWorld (id, randomnumber)
+SELECT x.id, least(floor(random() * 10000 + 1), 10000)
+FROM generate_series(1, 10000) AS x(id)
+WHERE NOT EXISTS (SELECT 1 FROM CachedWorld);
+
 CREATE TABLE IF NOT EXISTS Fortune (
    id integer NOT NULL,
    message varchar(2048) NOT NULL,

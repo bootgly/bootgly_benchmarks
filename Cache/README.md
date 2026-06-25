@@ -124,7 +124,7 @@ cd bootgly
 ```
 
 Each run also writes a `.marks` file under
-`bootgly/workdata/tests/benchmarks/Cache/` with one
+`bootgly/storage/tests/benchmarks/Cache/` with one
 `[driver][operation] time=… memory=…` line per cell, for trend tracking.
 
 ---

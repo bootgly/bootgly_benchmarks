@@ -15,6 +15,8 @@ if (extension_loaded('swoole') === false || extension_loaded('pdo_pgsql') === fa
 final class SwooleDatabaseBenchmark
 {
    private static PDOPool $Pool;
+   /** @var array<int,array{id:int,randomNumber:int}> Per-worker in-memory CachedWorld pool. */
+   private static array $CachedWorlds = [];
 
    public static function init (): void
    {
@@ -65,6 +67,37 @@ final class SwooleDatabaseBenchmark
 
          return json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
       });
+   }
+
+   public static function primeCache (): void
+   {
+      $cache = [];
+
+      foreach (self::rows('SELECT id, randomNumber AS "randomNumber" FROM CachedWorld') as $row) {
+         $id = (int) ($row['id'] ?? 0);
+         $cache[$id] = [
+            'id' => $id,
+            'randomNumber' => (int) ($row['randomNumber'] ?? $row['randomnumber'] ?? 0),
+         ];
+      }
+
+      self::$CachedWorlds = $cache;
+   }
+
+   public static function cachedQueries (int $count): string
+   {
+      $max = count(self::$CachedWorlds);
+
+      if ($max === 0) {
+         return '[]';
+      }
+
+      $Worlds = [];
+      while ($count-- > 0) {
+         $Worlds[] = self::$CachedWorlds[mt_rand(1, $max)] ?? null;
+      }
+
+      return json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
    }
 
    public static function fortunes (): string
@@ -236,6 +269,17 @@ final class SwooleDatabaseBenchmark
       return max(1, min(500, (int) $queries));
    }
 
+   public static function cachedCount (Request $Request): int
+   {
+      $count = $Request->get['count'] ?? 1;
+
+      if (is_array($count)) {
+         $count = $count[0] ?? 1;
+      }
+
+      return max(1, min(500, (int) $count));
+   }
+
    private static function env (string $name, string $default): string
    {
       $value = getenv($name);
@@ -267,6 +311,8 @@ $Server->set([
 
 $Server->on('workerStart', static function (): void {
    SwooleDatabaseBenchmark::init();
+   // @ Prime the per-worker in-memory CachedWorld pool for /cached-queries.
+   SwooleDatabaseBenchmark::primeCache();
 });
 
 $Server->on('request', static function (Request $Request, Response $Response): void {
@@ -293,6 +339,7 @@ $Server->on('request', static function (Request $Request, Response $Response): v
          '/query' => SwooleDatabaseBenchmark::query(SwooleDatabaseBenchmark::queryCount($Request)),
          '/fortunes' => SwooleDatabaseBenchmark::fortunes(),
          '/updates' => SwooleDatabaseBenchmark::updates(SwooleDatabaseBenchmark::queryCount($Request)),
+         '/cached-queries' => SwooleDatabaseBenchmark::cachedQueries(SwooleDatabaseBenchmark::cachedCount($Request)),
          default => null,
       };
 

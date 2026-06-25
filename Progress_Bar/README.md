@@ -174,5 +174,5 @@ of iterations.
 ![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/results/laravel-progress_bar-benchmark.1.png)
 
 Each run also saves a plain-text `.bench.marks` file under
-`bootgly/workdata/tests/benchmarks/Progress_Bar/`. See
+`bootgly/storage/tests/benchmarks/Progress_Bar/`. See
 [`scripts/README.md`](../scripts/README.md) for chart generation.

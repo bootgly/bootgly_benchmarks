@@ -177,7 +177,7 @@ Single opponent — one table, one row per load:
 Each run saves a plain-text `.bench.marks` file (easy to diff or archive):
 
 ```
-bootgly/workdata/tests/benchmarks/TCP_Server_CLI/<timestamp>_bench.marks
+bootgly/storage/tests/benchmarks/TCP_Server_CLI/<timestamp>_bench.marks
 ```
 
 Reports are auto-generated from a range of `.bench.marks` files by

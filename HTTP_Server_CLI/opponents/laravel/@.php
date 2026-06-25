@@ -5,7 +5,8 @@
  * --------------------------------------------------------------------------
  *
  * The same Laravel app (bootables/laravel) fronted by different web servers.
- * Each variant runs per-request (no persistent worker) — the popular stack.
+ * The nginx/Apache variants run per-request (PHP-FPM, no persistent worker);
+ * the Octane variant runs persistent in-memory workers on Swoole.
  */
 
 use Bootgly\ACI\Tests\Benchmark\Opponent;
@@ -39,4 +40,10 @@ $Runner->add(new Opponent(
    name: 'Laravel (Apache)',
    version: $laravelVersion,
    script: __DIR__ . '/laravel-apache.php',
+));
+
+$Runner->add(new Opponent(
+   name: 'Laravel (Octane)',
+   version: $laravelVersion,
+   script: __DIR__ . '/laravel-octane.php',
 ));

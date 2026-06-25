@@ -63,6 +63,13 @@ if ($loadSet === 'techempower' || $loadSet === 'benchmark') {
 $Runner->port = 8082;
 $Runner->connections = 514;
 $Runner->duration = 10;
+// ? Cold heavy-DB workers (/query, /updates open the whole pool) can need >3s on
+//   their first request at high server-workers; widen the preflight window so a
+//   slow cold start is not misread as a failed (N/A) cell. Only the TCP_Client
+//   runner exposes this knob.
+if (property_exists($Runner, 'preflightTimeout')) {
+   $Runner->preflightTimeout = 8;
+}
 
 // @ Load PHP loads for the active set
 $loadDir = match ($loadSet) {

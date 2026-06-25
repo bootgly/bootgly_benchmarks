@@ -166,5 +166,5 @@ The Bootgly engine does **not** sacrifice any feature available in Blade's
 | Laravel | 0.438s | 🥈 Second |
 
 Each run also saves a plain-text `.bench.marks` file under
-`bootgly/workdata/tests/benchmarks/Template_Engine/`. See
+`bootgly/storage/tests/benchmarks/Template_Engine/`. See
 [`scripts/README.md`](../scripts/README.md) for chart generation.

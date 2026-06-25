@@ -25,7 +25,12 @@ http {
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
-    keepalive_timeout 65;
+    # 5s, not 65s: during a 10s measured load traffic is continuous, so
+    # connections never idle out (in-load keepalive throughput unchanged), but
+    # between loads idle client connections close fast instead of lingering ~65s
+    # in nginx keepalive — otherwise the next route's preflight queues behind
+    # them and read-times-out (turns a working DB route into N/A).
+    keepalive_timeout 5;
     keepalive_requests 1000000;
 
     client_body_temp_path {{RUN}}/body;

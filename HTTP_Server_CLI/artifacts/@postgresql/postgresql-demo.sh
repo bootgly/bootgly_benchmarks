@@ -9,7 +9,7 @@ PGHOST="${PGHOST:-127.0.0.1}"
 PGPORT="${PGPORT:-5432}"
 PGDATABASE="${PGDATABASE:-bootgly}"
 PGUSER="${PGUSER:-postgres}"
-PGDATA="${PGDATA:-$BOOTGLY_DIR/workdata/temp/postgresql-demo}"
+PGDATA="${PGDATA:-$BOOTGLY_DIR/storage/temp/postgresql-demo}"
 PGLOG="${PGLOG:-$PGDATA/postgresql.log}"
 
 find_pg_bin () {

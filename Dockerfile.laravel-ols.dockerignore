@@ -1,0 +1,17 @@
+# Build-context trim for the Laravel OLS image (context = bootables/laravel).
+# vendor/ is ~3GB on the host; it is reinstalled in-image via
+# `composer install --no-dev --optimize-autoloader`, so keeping it out of the
+# COPY layer drops the final image size sharply. The ols/ vhost config,
+# composer.json/lock, app/, config/, routes/, public/, resources/, database/,
+# bootstrap/ and .env are intentionally NOT ignored (the build needs them).
+vendor/
+run/
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*.php
+.git
+.github/
+tests/
+*.log

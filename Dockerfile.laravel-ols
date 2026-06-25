@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# bootgly/bootgly_benchmarks:laravel-ols — Laravel + OpenLiteSpeed + LSCache
+#
+# OpenLiteSpeed (event-driven server + built-in LSCache module) fronting lsphp84
+# for the Laravel TechEmpower app. The deterministic routes (/plaintext, /json,
+# /fortunes) are marked public-cacheable in the vhost, so OLS serves them from
+# LSCache WITHOUT invoking PHP after the first request. /db, /query, /updates
+# stay dynamic (lsphp + PostgreSQL), preserving TFB semantics.
+#
+# Build context = the Laravel app dir (it carries the app + ols/ config):
+#   docker build -f Dockerfile.laravel-ols -t bootgly-laravel-ols \
+#     HTTP_Server_CLI/bootables/laravel
+#
+# Run (host network so it reaches host PostgreSQL at 127.0.0.1:5432 and binds
+# 8082 directly — fair, no NAT):
+#   docker run --rm --network host -e BOOTGLY_WORKERS=15 \
+#     -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=bootgly \
+#     -e DB_USERNAME=postgres -e DB_PASSWORD= --name laravel-ols bootgly-laravel-ols
+#
+# NOTE: the OLS config (ols/*.conf) is a best-effort first draft written without
+# a running daemon — expect 1-2 iterations on first build/run.
+# ============================================================================
+
+FROM litespeedtech/openlitespeed:1.8.4-lsphp84
+
+# ! lsphp84 PostgreSQL extension + composer toolchain
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends lsphp84-pgsql git unzip ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ! Laravel app (build context = the app dir)
+ENV APP=/var/www/laravel
+COPY . $APP
+RUN set -eux; \
+    cd "$APP"; \
+    rm -rf bootstrap/cache/*.php; \
+    /usr/local/lsws/lsphp84/bin/php /usr/bin/composer install \
+      --no-interaction --no-progress --no-dev --optimize-autoloader; \
+    mkdir -p "$APP/logs" storage/framework/{cache,sessions,views} storage/logs; \
+    useradd -u 1000 -m -s /bin/sh bench 2>/dev/null || true; \
+    chown -R 1000:1000 "$APP"
+# ^ App owned by a real UID (1000), not root: OLS suEXEC refuses to run scripts
+#   whose docroot owner UID < 100 ("cgidSuEXEC failed"). lsphp then runs as 1000.
+
+# ! OLS config — KEEP the stock httpd_config.conf (its lsphp + suEXEC setup
+#   works out of the box); only overwrite the Example vhost with the Laravel +
+#   LSCache vhconf. The entrypoint patches the listener port, the Example vhRoot
+#   and the lsphp pool size at runtime. (httpd_config.conf is intentionally NOT
+#   replaced — a hand-rolled minimal one breaks suEXEC.)
+COPY ols/vhconf.conf /usr/local/lsws/conf/vhosts/Example/vhconf.conf
+
+# ! Entrypoint: patch port/vhRoot/pool on the stock config, start OLS foreground.
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'CHILDREN="${BOOTGLY_WORKERS:-$(nproc)}"' \
+  'CONF=/usr/local/lsws/conf/httpd_config.conf' \
+  'sed -i "s/\*:8088/*:8082/" "$CONF"' \
+  'sed -i "s#vhRoot  *Example/#vhRoot /var/www/laravel#" "$CONF"' \
+  'sed -i "s/PHP_LSAPI_CHILDREN=10/PHP_LSAPI_CHILDREN=${CHILDREN}/" "$CONF"' \
+  'sed -i "s/maxConns  *10/maxConns ${CHILDREN}/" "$CONF"' \
+  'chown -R 994:994 /usr/local/lsws/conf 2>/dev/null || true' \
+  'mkdir -p /tmp/lshttpd /usr/local/lsws/logs' \
+  ': > /usr/local/lsws/logs/error.log' \
+  '/usr/local/lsws/bin/lswsctrl start || { cat /usr/local/lsws/logs/error.log; exit 1; }' \
+  'exec tail -F /usr/local/lsws/logs/error.log /var/www/laravel/logs/vhost-error.log 2>/dev/null' \
+  > /entrypoint.sh && chmod +x /entrypoint.sh
+
+EXPOSE 8082
+ENTRYPOINT ["/entrypoint.sh"]

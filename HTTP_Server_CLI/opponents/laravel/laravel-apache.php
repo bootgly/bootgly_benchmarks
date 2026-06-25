@@ -4,72 +4,82 @@
  * Bootgly Benchmarks — HTTP_Server_CLI — Laravel (Apache + PHP-FPM) Opponent
  * --------------------------------------------------------------------------
  *
- * Start/stop a Laravel app served by Apache (mpm_event) → PHP-FPM 8.4 via
- * mod_proxy_fcgi over the same unix socket as the nginx variant (per-request).
+ * Runs the Laravel app under Apache (mpm_event) → PHP-FPM 8.4 via mod_proxy_fcgi
+ * (per-request mode) inside a Docker container — kept off the host to avoid
+ * polluting it with Apache/FPM. Every request is proxied straight to
+ * public/index.php; /db, /query, /updates hit PHP-FPM + PostgreSQL (TFB
+ * semantics).
+ *
+ * Container uses --network host: binds :8082 directly and reaches host
+ * PostgreSQL at 127.0.0.1:5432 (no NAT — fair).
  *
  * Usage:
  *   php laravel-apache.php start
  *   php laravel-apache.php stop
  *
- * Environment variables:
- *   BENCHMARK_PORT   — port to listen on (default: 8082)
- *   BOOTGLY_WORKERS  — reserved (Apache mpm_event sizing is fixed in template)
- *   FPM_MAX_CHILDREN — php-fpm static children (default: 64; < PG max_connections)
+ * Environment variables (forwarded into the container):
+ *   BENCHMARK_PORT                 — port to listen on (default: 8082)
+ *   BOOTGLY_WORKERS                — php-fpm pm.max_children (default: nproc/2)
+ *   BOOTGLY_HTTP_SERVER_CLI_ROUTER — generic vs techempower set (parity only;
+ *                                    Laravel serves the same web.php routes)
+ *   DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS — mapped to Laravel DB_* names
+ *
+ * Requires a running Docker daemon. The image is built once (if missing) on
+ * first start — pre-build it before a sweep so the first round is not stalled:
+ *   docker build -f ../../../Dockerfile.laravel-apache -t bootgly-laravel-apache \
+ *     ../../bootables/laravel
  */
 
 $bootablesDir = realpath(__DIR__ . '/../../bootables/laravel');
-$configsDir = $bootablesDir . '/configs';
-$runDir = $bootablesDir . '/run';
-$rootDir = $bootablesDir . '/public';
+$dockerfile = realpath(__DIR__ . '/../../..') . '/Dockerfile.laravel-apache';
+$image = 'bootgly-laravel-apache';
+$container = 'bench-laravel-apache';
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
-$children = getenv('FPM_MAX_CHILDREN') ?: '64';
-$jit = getenv('FPM_JIT') ?: 'tracing';
-$appUser = (function_exists('posix_geteuid') ? (posix_getpwuid(posix_geteuid())['name'] ?? '') : '') ?: (get_current_user() ?: 'nobody');
+$workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-$fpmBin = '/usr/sbin/php-fpm8.4';
-$apacheBin = '/usr/sbin/apache2';
-$apacheModules = '/usr/lib/apache2/modules';
+// PHP-FPM is per-request (1 child = 1 blocking request), so the pool needs a
+// real process count. BOOTGLY_WORKERS sets pm.max_children in the container;
+// FPM_MAX_CHILDREN overrides it if a larger pool is wanted (keep < PG max).
+$children = getenv('FPM_MAX_CHILDREN') ?: $workers;
 
 $action = $argv[1] ?? 'start';
 
 match ($action) {
-   'start' => (function () use ($bootablesDir, $configsDir, $runDir, $rootDir, $port, $children, $jit, $appUser, $fpmBin, $apacheBin, $apacheModules) {
-      @mkdir($runDir, 0777, true);
+   'start' => (function () use ($bootablesDir, $dockerfile, $image, $container, $children) {
+      // # Build the image once if it is not present yet.
+      exec("docker image inspect {$image} > /dev/null 2>&1", $out, $code);
+      if ($code !== 0) {
+         exec("docker build -f {$dockerfile} -t {$image} {$bootablesDir} > /dev/null 2>&1");
+      }
 
-      $vars = [
-         '{{RUN}}' => $runDir,
-         '{{ROOT}}' => $rootDir,
-         '{{PORT}}' => $port,
-         '{{CHILDREN}}' => $children,
-         '{{JIT}}' => $jit,
-         '{{APP}}' => $bootablesDir,
-         '{{USER}}' => $appUser,
-         '{{MODULES}}' => $apacheModules,
-      ];
+      // @ Remove any stale container, then run fresh.
+      exec("docker rm -f {$container} > /dev/null 2>&1");
 
-      file_put_contents("{$runDir}/php-fpm.conf", strtr(file_get_contents("{$configsDir}/php-fpm.conf.tpl"), $vars));
-      file_put_contents("{$runDir}/apache.conf", strtr(file_get_contents("{$configsDir}/apache.conf.tpl"), $vars));
+      // # Laravel DB env (Bootgly DB_* → Laravel names); host PG via host network.
+      $db = sprintf(
+         '-e DB_CONNECTION=pgsql -e DB_HOST=%s -e DB_PORT=%s -e DB_DATABASE=%s -e DB_USERNAME=%s -e DB_PASSWORD=%s',
+         escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
+         escapeshellarg(getenv('DB_PORT') ?: '5432'),
+         escapeshellarg(getenv('DB_NAME') ?: 'bootgly'),
+         escapeshellarg(getenv('DB_USER') ?: 'postgres'),
+         escapeshellarg(getenv('DB_PASS') ?: '')
+      );
 
-      // php-fpm daemonizes itself; apache -k start daemonizes.
-      // XDEBUG_MODE=off prevents Xdebug from overriding zend_execute_ex (keeps JIT).
-      exec("XDEBUG_MODE=off {$fpmBin} --fpm-config {$runDir}/php-fpm.conf > /dev/null 2>&1");
-      exec("{$apacheBin} -f {$runDir}/apache.conf -k start > /dev/null 2>&1");
+      // # Generic vs TechEmpower selection (parity with the other Docker
+      //   opponents); the entrypoint branches on this env.
+      $router = getenv('BOOTGLY_HTTP_SERVER_CLI_ROUTER') ?: 'techempower';
+
+      exec(
+         "docker run -d --network host --name {$container} " .
+         "-e BOOTGLY_WORKERS={$children} " .
+         "-e BOOTGLY_HTTP_SERVER_CLI_ROUTER=" . escapeshellarg($router) . ' ' .
+         "-e XDEBUG_MODE=off -e APP_ENV=production {$db} {$image} > /dev/null 2>&1"
+      );
    })(),
 
-   'stop' => (function () use ($runDir, $apacheBin, $port) {
-      if (is_file("{$runDir}/apache.conf")) {
-         exec("{$apacheBin} -f {$runDir}/apache.conf -k stop > /dev/null 2>&1");
-      }
-      if (is_file("{$runDir}/php-fpm.pid")) {
-         exec('kill ' . (int) file_get_contents("{$runDir}/php-fpm.pid") . ' > /dev/null 2>&1');
-      }
-
-      usleep(400_000);
-
-      // Fallbacks: stray apache for this config, stray php-fpm, then the port
-      exec("pkill -9 -f '{$runDir}/apache.conf' > /dev/null 2>&1");
-      exec("pkill -9 -f '{$runDir}/php-fpm.conf' > /dev/null 2>&1");
+   'stop' => (function () use ($container, $port) {
+      exec("docker rm -f {$container} > /dev/null 2>&1");
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
    })(),
 

@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# bootgly-workerman — Workerman opponent (pure-PHP event-loop HTTP server)
+#
+# Runs the Workerman bootable for the Bootgly HTTP_Server_CLI benchmark. The
+# entrypoint picks the bootable from BOOTGLY_HTTP_SERVER_CLI_ROUTER — exactly
+# how the native opponent script branches:
+#   techempower  -> workerman-techempower-postgres.php (PostgreSQL TFB loads)
+#   anything else -> workerman-routes.php              (generic route set)
+# and starts it in the FOREGROUND (no `-d` daemonize — the CONTAINER is the
+# daemon; daemonizing would make the container exit immediately).
+#
+# pdo_pgsql is built in-image (the TechEmpower bootable needs it); composer
+# `install --no-dev` vendors workerman/workerman in-image too.
+#
+# Build context = the Workerman bootable dir (so `COPY . /app` ships the app):
+#   docker build -f Dockerfile.workerman -t bootgly-workerman \
+#     HTTP_Server_CLI/bootables/workerman
+#
+# Run (host network so it binds :8082 directly and reaches host PostgreSQL at
+# 127.0.0.1:5432 — fair, no NAT):
+#   docker run -d --network host \
+#     -e SERVER_WORKER_NUM=15 -e BOOTGLY_HTTP_SERVER_CLI_ROUTER=techempower \
+#     -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_NAME=bootgly \
+#     -e DB_USER=postgres -e DB_PASS= \
+#     --name bench-workerman bootgly-workerman
+# ============================================================================
+
+FROM php:8.4-cli-bookworm
+
+# ! pdo_pgsql (TechEmpower bootable). git + unzip are needed by composer to
+#   vendor workerman/workerman. Build-only deps are purged after composer
+#   install (see below); only the libpq5 pdo_pgsql runtime is kept.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $PHPIZE_DEPS libpq-dev git unzip; \
+    docker-php-ext-install -j"$(nproc)" pdo_pgsql pcntl
+
+# ! Composer (build-time) to vendor workerman/workerman
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ! Workerman bootable (build context = the bootable dir). The host vendor/ and
+#   logs are excluded via Dockerfile.workerman.dockerignore; vendor is rebuilt.
+WORKDIR /app
+COPY . /app
+RUN set -eux; \
+    composer install --no-interaction --no-progress --no-dev; \
+    apt-get purge -y $PHPIZE_DEPS libpq-dev git unzip; \
+    rm -rf /var/lib/apt/lists/* /root/.composer
+
+# ! Entrypoint: select the bootable from BOOTGLY_HTTP_SERVER_CLI_ROUTER and run
+#   it in the FOREGROUND (no `-d` — the container is the daemon).
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'if [ "$BOOTGLY_HTTP_SERVER_CLI_ROUTER" = "techempower" ]; then' \
+  '  BOOTABLE=workerman-techempower-postgres.php' \
+  'else' \
+  '  BOOTABLE=workerman-routes.php' \
+  'fi' \
+  'exec php "$BOOTABLE" start' \
+  > /entrypoint.sh && chmod +x /entrypoint.sh
+
+EXPOSE 8082
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,5 @@
+# Ship only the four bootable .php servers. A stale coroutine pid file (written
+# at runtime by swoole-coroutine-routes.php) and any logs must not pollute the
+# build context.
+*.pid
+*.log

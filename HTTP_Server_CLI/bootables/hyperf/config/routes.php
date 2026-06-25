@@ -11,7 +11,21 @@
 
 declare(strict_types=1);
 
+use App\Tfb;
+use Hyperf\HttpServer\Contract\RequestInterface;
+use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\HttpServer\Router\Router;
+
+// --- TechEmpower routes (7) — Bootgly vs Hyperf comparison surface ---
+// Return string → text/plain; return array → JSON (Hyperf auto-encodes).
+// Request/Response are injected into the closure by Hyperf's param resolver.
+Router::get('/plaintext', static fn () => 'Hello, World!');
+Router::get('/json', static fn () => ['message' => 'Hello, World!']);
+Router::get('/db', static fn () => Tfb::db());
+Router::get('/query', static fn (RequestInterface $request) => Tfb::query(Tfb::count($request->query('queries', 1))));
+Router::get('/fortunes', static fn (ResponseInterface $response) => $response->html(Tfb::fortunes()));
+Router::get('/updates', static fn (RequestInterface $request) => Tfb::updates(Tfb::count($request->query('queries', 1))));
+Router::get('/cached-queries', static fn (RequestInterface $request) => Tfb::cached(Tfb::count($request->query('count', 1))));
 
 // --- Static routes (10) ---
 $statics = [

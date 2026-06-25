@@ -35,6 +35,12 @@ return [
       Constant::OPTION_LOG_FILE         => '/dev/null',
       Constant::OPTION_LOG_LEVEL        => SWOOLE_LOG_ERROR,
       Constant::OPTION_OPEN_TCP_NODELAY => true,
+      // Parity with the standalone Swoole (base) opponent: each worker accepts
+      // via SO_REUSEPORT, and HTTP compression off (the Swoole opponent sets
+      // both; hook_flags=SWOOLE_HOOK_ALL is already applied by Hyperf's
+      // StartServer via Coroutine::set).
+      Constant::OPTION_ENABLE_REUSE_PORT => true,
+      Constant::OPTION_HTTP_COMPRESSION => false,
       Constant::OPTION_MAX_COROUTINE    => 100000,
    ],
 ];

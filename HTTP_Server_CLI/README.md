@@ -2,7 +2,7 @@
 
 Benchmarks for **Bootgly HTTP Server CLI**, split into two **load sets**:
 
-- **`techempower`** — the seven canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`, `/cached-queries`), served identically across frameworks for a **fair cross-framework comparison** (Bootgly vs Swoole TechEmpower today; more opponents in Phase 2).
+- **`techempower`** — the seven canonical TechEmpower routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`, `/cached-queries`), served identically across frameworks for a **fair cross-framework comparison**. Every cross-framework opponent now serves the TechEmpower routes via **Docker** (each opponent auto-builds its image and runs containerized); **Bootgly** is the native, pure-PHP baseline (no Docker, no system deps).
 - **`benchmark`** — a Bootgly-internal stress surface (100 static, 100 dynamic, nested groups, per-route middleware, catch-all, plus DB probes) for **self-comparison during framework development**. Bootgly-only.
 
 Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` is `techempower` or `benchmark`, `<indexes>` is `*` (all) or a comma list (e.g. `techempower:1,2`). The Bootgly opponent derives the matching server router from the set automatically; set `BOOTGLY_HTTP_SERVER_CLI_ROUTER=<set>` only to override it.
@@ -35,8 +35,9 @@ Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` 
 | **nproc** | CPU count detection | ✅ |
 | **PostgreSQL** | DB loads (`/db`, `/query`, `/fortunes`, `/updates`, `/cached-queries`) + Probes | Only for DB loads |
 | **psql** | Seeds the TechEmpower tables (`World`, `Fortune`, `CachedWorld`) + Probe control query | Only for DB loads |
-| **Swoole extension** + `pdo_pgsql` | `swoole-techempower` opponent | Only for cross-framework |
-| **FrankenPHP binary** | Phase 2 opponents | Optional |
+| **Docker** | Runs every cross-framework opponent (each opponent auto-builds its image on first start). Bootgly itself needs no Docker. | Only for cross-framework |
+| **Swoole extension** + `pdo_pgsql` | Inside the Docker image (no host install) | — |
+| **FrankenPHP binary** | Inside the Docker image (no host install) | — |
 
 > **No sudo / no system PostgreSQL?** Start a throwaway local instance — **no `sudo` needed** —
 > with the bundled script:
@@ -63,55 +64,51 @@ Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` 
 > `bootgly` and `bootgly_benchmarks` sit **side by side** in the same parent
 > directory — the runner resolves the framework via that relative layout.
 
-### 1. Install opponent dependencies
+### 1. Opponent dependencies (Docker)
 
-> The current cross-framework run (`techempower` set) only needs **Bootgly** and
-> **Swoole TechEmpower** (Swoole + `pdo_pgsql`). The servers below —
-> RoadRunner, Workerman, Hyperf, FrankenPHP — are for the **Phase 2**
-> opponents; install them only when their TechEmpower variants land.
+> Every cross-framework opponent now runs in **Docker** — there are no per-opponent
+> native install steps (no `composer install`, no `pecl install swoole`, no FrankenPHP
+> `curl`). Each opponent's start script builds its image if missing
+> (`docker image inspect <image> || docker build -f Dockerfile.<name> -t <image> <context>`)
+> and then runs it with `--network host` (the container binds `:8082` directly and
+> reaches host PostgreSQL at `127.0.0.1:5432` — no NAT, fair). The container runs the
+> server in the foreground (the container *is* the daemon). Only a **running Docker
+> daemon** is required on the host; all language runtimes and extensions live inside
+> the images.
 
-```bash
-cd bootgly_benchmarks/HTTP_Server_CLI/bootables
-```
+**Bootgly is the only native (non-Docker) opponent** — pure PHP, no system deps.
 
-#### RoadRunner
-
-```bash
-cd roadrunner && composer install && php ./vendor/bin/rr get-binary && cd ..
-```
-
-#### Workerman
+To avoid paying the build cost during a timed sweep, pre-build the images first
+(otherwise they build automatically on the opponent's first `start`):
 
 ```bash
-cd workerman && composer install && cd ..
+cd bootgly_benchmarks
+docker build -f Dockerfile.<name> -t bootgly-<name> HTTP_Server_CLI/bootables/<context>
 ```
 
-#### Hyperf
+Each `Dockerfile.<name>` lives at the `bootgly_benchmarks` repo root; the build context
+is the opponent's bootable directory:
 
-```bash
-cd hyperf && composer install && cd ..
-```
+| Opponent(s) | Docker image | Build context |
+|-------------|--------------|---------------|
+| `swoole-base`, `swoole-process`, `swoole-coroutine`, `swoole-techempower` | `bootgly-swoole` (shared) | `HTTP_Server_CLI/bootables/swoole` |
+| `hyperf` | `bootgly-hyperf` | `HTTP_Server_CLI/bootables/hyperf` |
+| `workerman` | `bootgly-workerman` | `HTTP_Server_CLI/bootables/workerman` |
+| `roadrunner` | `bootgly-roadrunner` | `HTTP_Server_CLI/bootables/roadrunner` |
+| `frankenphp` | `bootgly-frankenphp` | `HTTP_Server_CLI/bootables/frankenphp` |
+| `laravel-nginx` | `bootgly-laravel-nginx` | `HTTP_Server_CLI/bootables/laravel` |
+| `laravel-apache` | `bootgly-laravel-apache` | `HTTP_Server_CLI/bootables/laravel` |
+| `laravel-octane` | `bootgly-laravel-octane` | `HTTP_Server_CLI/bootables/laravel` |
+| `laravel-ols` | `bootgly-laravel-ols` | `HTTP_Server_CLI/bootables/laravel` |
 
-> **Note:** Hyperf requires the Swoole extension with `swoole.use_shortname=Off` in your `php.ini`.
+Worker count is read from `BOOTGLY_WORKERS` (default `nproc / 2`). DB connection is
+passed via `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` (the Laravel images
+remap these to `DB_CONNECTION=pgsql` + `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD`).
+Stopping an opponent removes its container (`docker rm -f <container>`).
 
-### 2. Install Swoole (for `swoole-techempower`)
-
-```bash
-pecl install swoole
-```
-
-Add `extension=swoole.so` to your `php.ini`. The `swoole-techempower` opponent
-also needs `pdo_pgsql` (`php8.4-pgsql` on Debian/Ubuntu).
-
-### 3. Install FrankenPHP (optional, Phase 2)
-
-```bash
-curl -fsSL https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64 \
-   -o /usr/local/bin/frankenphp
-chmod +x /usr/local/bin/frankenphp
-```
-
-See: https://frankenphp.dev/docs/install
+> **Note:** no benchmark sweep has been run for the cross-framework opponents yet — the
+> images are built and **functionally smoke-tested only** (no throughput numbers below
+> are derived from them).
 
 ---
 
@@ -281,19 +278,21 @@ supports multi-worker forking and HTTP pipelining.
 
 ## 🏁 Opponents
 
-| Server | Language / Runtime | Mode | Used by |
-|--------|-------------------|------|---------|
-| **Bootgly** HTTP Server CLI | PHP (event-loop) | Baseline | `techempower`, `benchmark` |
-| **Swoole** TechEmpower | PHP (C extension) | PROCESS + PDO pool + `/plaintext` & `/json` | `techempower` |
-| **Laravel** (nginx) | PHP-FPM 8.4 behind nginx | Per-request (no persistent worker), six TechEmpower routes | `techempower` |
-| **Laravel** (Apache) | PHP-FPM 8.4 behind Apache `mpm_event` (`mod_proxy_fcgi`) | Per-request (no persistent worker), six TechEmpower routes | `techempower` |
-| **Workerman** v5 | PHP (event-loop) | Routes | Phase 2 (pending) |
-| **Swoole** (Base mode) | PHP (C extension) | Reactor per worker | Phase 2 (pending) |
-| **Swoole** (Process mode) | PHP (C extension) | Master + workers | Phase 2 (pending) |
-| **Swoole** (Coroutine mode) | PHP (C extension) | Coroutine + fork | Phase 2 (pending) |
-| **RoadRunner** | Go + PHP (goridge) | PSR-7 worker | Phase 2 (pending) |
-| **FrankenPHP** | Go + PHP (worker mode) | Caddy-based | Phase 2 (pending) |
-| **Hyperf** | PHP (Swoole framework) | Full-stack coroutine | Phase 2 (pending) |
+| Server | Runtime | TFB routes | Docker image |
+|--------|---------|-----------|--------------|
+| **Bootgly** HTTP Server CLI | PHP (event-loop) | 7 | native baseline (no Docker) |
+| **Swoole** (Base mode) | PHP (C extension), reactor per worker | 7 (TechEmpower bootable in `SWOOLE_BASE` mode) | `bootgly-swoole` (shared) |
+| **Swoole** (Process mode) | PHP (C extension), master + workers | generic route set only (mode demo) | `bootgly-swoole` (shared) |
+| **Swoole** (Coroutine mode) | PHP (C extension), coroutine + fork | generic route set only (mode demo) | `bootgly-swoole` (shared) |
+| **Swoole** TechEmpower | PHP (C extension), `SWOOLE_BASE` + PDO pool | 7 | `bootgly-swoole` (shared) |
+| **Hyperf** | PHP (Swoole framework), full-stack coroutine | 7 (`/cached-queries` = per-worker in-memory `CachedWorld` cache) | `bootgly-hyperf` |
+| **Workerman** v5 | PHP (event-loop), sync per-worker PDO | 7 | `bootgly-workerman` |
+| **RoadRunner** | Go + PHP (goridge), PSR-7 worker, per-worker PDO | 7 | `bootgly-roadrunner` |
+| **FrankenPHP** | Go + PHP worker mode (Caddy-based), per-worker PDO | 7 | `bootgly-frankenphp` |
+| **Laravel** (nginx) | PHP-FPM 8.4 behind nginx, per-request | 6 (no `/cached-queries`) | `bootgly-laravel-nginx` |
+| **Laravel** (Apache) | PHP-FPM 8.4 behind Apache `mpm_event`, per-request | 6 (no `/cached-queries`) | `bootgly-laravel-apache` |
+| **Laravel** (Octane) | Laravel Octane on Swoole, persistent workers | 6 (no `/cached-queries`) | `bootgly-laravel-octane` |
+| **Laravel** (OLS) | OpenLiteSpeed + LSCache | 6 (LSCache serves `/plaintext`, `/json`, `/fortunes` from cache; `/db`, `/query`, `/updates` dynamic) | `bootgly-laravel-ols` |
 
 Event-loop opponents use `nproc / 2` workers for fair CPU distribution. The
 **Laravel** opponents are the exception: PHP-FPM is per-request (one child = one
@@ -301,16 +300,27 @@ blocking request), so it runs a fixed static process pool (`FPM_MAX_CHILDREN`,
 default `64`) instead of `nproc / 2`. The pool size also caps concurrent Postgres
 connections, so keep it below the server's `max_connections` (default `100`).
 
-The TechEmpower set runs Bootgly against **Swoole TechEmpower** and the two
-**Laravel** stacks (`laravel-nginx`, `laravel-apache`), which serve all six
-TechEmpower routes. The remaining opponents are still registered but serve the
-pre-split router routes, not the TechEmpower routes — their `/plaintext` + `/json`
-+ four-DB-route variants are **Phase 2 (pending)**. Running those against the
-`techempower` set today fails preflight (404 on `/plaintext`).
+Every cross-framework opponent now serves the TechEmpower routes via Docker. The
+persistent-worker opponents — `swoole-base`, `swoole-techempower`, `hyperf`,
+`workerman`, `roadrunner`, `frankenphp` — implement all **seven** TechEmpower routes
+(including `/cached-queries`). The four **Laravel** stacks (`laravel-nginx`,
+`laravel-apache`, `laravel-octane`, `laravel-ols`) serve **six** (see below). The
+`swoole-process` and `swoole-coroutine` variants remain **generic-route mode demos** —
+they serve the generic route set, not the TechEmpower routes, so they are not part of a
+`techempower` sweep.
+
+> Laravel implements only six TechEmpower routes — `/cached-queries` is deliberately
+> **N/A** for Laravel. The four Laravel variants share one app, and PHP-FPM (nginx,
+> Apache) is per-request: a fresh worker per request cannot hold an in-process cache, so
+> a `/cached-queries` route there would be meaningless. The persistent-worker opponents
+> (swoole, hyperf, workerman, roadrunner, frankenphp) do implement all seven.
 
 > The Laravel stacks run a full framework bootstrap **per request** (no persistent
 > worker) — the mainstream popular deployment. They are expected to score far below
 > the persistent-worker opponents; that contrast is the point of including them.
+
+> No benchmark sweep has been run for the new opponents yet — their images are built and
+> **functionally smoke-tested only**, not measured for throughput.
 
 ### Available names
 
@@ -318,66 +328,78 @@ CLI filter values for `--opponents=`:
 
 | Name | Description |
 |------|-------------|
-| `bootgly` | Bootgly HTTP Server CLI (always baseline) |
-| `swoole-techempower` | Swoole PROCESS + PDO pool, six TechEmpower routes |
-| `laravel-nginx` | Laravel 13 on PHP-FPM 8.4 behind nginx, six TechEmpower routes (per-request) |
-| `laravel-apache` | Laravel 13 on PHP-FPM 8.4 behind Apache `mpm_event`, six TechEmpower routes (per-request) |
-| `workerman` | Workerman v5 — Phase 2 (pre-split router routes only) |
-| `swoole-base` | Swoole SWOOLE_BASE mode — Phase 2 |
-| `swoole-process` | Swoole SWOOLE_PROCESS mode — Phase 2 |
-| `swoole-coroutine` | Swoole Coroutine mode — Phase 2 |
-| `roadrunner` | RoadRunner (Go + PHP) — Phase 2 |
-| `frankenphp` | FrankenPHP worker mode — Phase 2 |
-| `hyperf` | Hyperf (Swoole framework) — Phase 2 |
+| `bootgly` | Bootgly HTTP Server CLI — native (non-Docker) baseline, all 7 TechEmpower routes |
+| `swoole-base` | Swoole `SWOOLE_BASE` mode (image `bootgly-swoole`) — swaps to the TechEmpower bootable, all 7 routes |
+| `swoole-process` | Swoole `SWOOLE_PROCESS` mode (image `bootgly-swoole`) — generic route set only (mode demo, no TFB) |
+| `swoole-coroutine` | Swoole Coroutine mode (image `bootgly-swoole`) — generic route set only (mode demo, no TFB) |
+| `swoole-techempower` | Swoole `SWOOLE_BASE` + PDO pool (image `bootgly-swoole`) — all 7 TechEmpower routes |
+| `hyperf` | Hyperf, Swoole framework (image `bootgly-hyperf`) — all 7 routes (`/cached-queries` = per-worker in-memory cache) |
+| `workerman` | Workerman v5, sync per-worker PDO (image `bootgly-workerman`) — all 7 routes |
+| `roadrunner` | RoadRunner (Go + PHP), PSR-7 worker, per-worker PDO (image `bootgly-roadrunner`) — all 7 routes |
+| `frankenphp` | FrankenPHP worker mode, per-worker PDO (image `bootgly-frankenphp`, base `dunglas/frankenphp:php8.4`) — all 7 routes |
+| `laravel-nginx` | Laravel on PHP-FPM 8.4 behind nginx, per-request (image `bootgly-laravel-nginx`) — 6 routes (no `/cached-queries`) |
+| `laravel-apache` | Laravel on PHP-FPM 8.4 behind Apache `mpm_event`, per-request (image `bootgly-laravel-apache`) — 6 routes (no `/cached-queries`) |
+| `laravel-octane` | Laravel Octane on Swoole, persistent workers (image `bootgly-laravel-octane`) — 6 routes (no `/cached-queries`) |
+| `laravel-ols` | Laravel on OpenLiteSpeed + LSCache (image `bootgly-laravel-ols`) — 6 routes (LSCache serves `/plaintext`, `/json`, `/fortunes`; `/db`, `/query`, `/updates` dynamic) |
 
-### Laravel opponents (`laravel-nginx`, `laravel-apache`)
+### Laravel opponents (`laravel-nginx`, `laravel-apache`, `laravel-octane`, `laravel-ols`)
 
-Both variants serve the **same** app (`bootables/laravel/`) fronted by a different
-web server, talking to **PHP-FPM 8.4** over a unix socket. The start script renders
-`configs/*.tpl` into `bootables/laravel/run/` per run (gitignored).
+All four variants serve the **same** app (`bootables/laravel/`), each in its own Docker
+image (`bootgly-laravel-nginx` / `-apache` / `-octane` / `-ols`). `laravel-nginx` and
+`laravel-apache` front **PHP-FPM 8.4** with nginx / Apache `mpm_event` (per-request);
+`laravel-octane` runs **Laravel Octane on Swoole** with persistent workers; `laravel-ols`
+runs **OpenLiteSpeed + LSCache**. The image bakes everything in (`composer install --no-dev`,
+the web server, `pdo_pgsql`, and the FPM/web-server configs rendered from `configs/*.tpl`) —
+there is no native `apt-get`/`composer install`/`php artisan optimize` step on the host.
 
-Prerequisites:
+Prerequisites — only a **running Docker daemon** plus a **seeded host PostgreSQL**:
 
 ```bash
-sudo apt-get install -y php8.4-fpm php8.4-pgsql php8.4-opcache nginx apache2
-# Postgres seeded with the World/Fortune tables:
+# Postgres seeded with the World/Fortune tables (reached at host 127.0.0.1:5432):
 bash artifacts/@postgresql/postgresql-demo.sh start
 ```
 
-One-time bootable setup (after cloning — `vendor/` and caches are gitignored):
+The image auto-builds on the opponent's first `start`; pre-build it to keep the build cost
+out of a timed sweep (from `bootgly_benchmarks`):
 
 ```bash
-cd bootables/laravel
-composer install --no-dev --classmap-authoritative --optimize-autoloader
-php artisan optimize
+docker build -f Dockerfile.laravel-nginx  -t bootgly-laravel-nginx  HTTP_Server_CLI/bootables/laravel
+docker build -f Dockerfile.laravel-apache -t bootgly-laravel-apache HTTP_Server_CLI/bootables/laravel
+docker build -f Dockerfile.laravel-octane -t bootgly-laravel-octane HTTP_Server_CLI/bootables/laravel
+docker build -f Dockerfile.laravel-ols    -t bootgly-laravel-ols    HTTP_Server_CLI/bootables/laravel
 ```
 
-Tuning knobs (env): `BENCHMARK_PORT` (default `8082`), `FPM_MAX_CHILDREN`
-(default `64`; the static FPM pool size, which also caps concurrent Postgres
-connections — keep below PG `max_connections`), `FPM_JIT` (`tracing` | `function` |
-`off`; default `tracing`). The app reads its DB from `bootables/laravel/.env`
-(committed: localhost Postgres, throwaway `APP_KEY` — no secrets).
+Tuning knobs (env, forwarded into the container via `docker run -e`): `BENCHMARK_PORT`
+(default `8082`), `BOOTGLY_WORKERS` / `FPM_MAX_CHILDREN` (default `64`; the static FPM pool
+size for the FPM variants, which also caps concurrent Postgres connections — keep below PG
+`max_connections`), `FPM_JIT` (`tracing` | `function` | `off`; default `tracing`). The DB is
+the Bootgly `DB_*` set (`DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS`), which the
+opponent script remaps to Laravel's `DB_CONNECTION=pgsql` + `DB_HOST` / `DB_PORT` /
+`DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD`.
 
 #### Performance notes (how these stacks are tuned)
 
-The FPM pool + web-server configs mirror TechEmpower's Laravel reference
+The FPM pool + web-server tuning is **baked into the image** (the Dockerfile/entrypoint sets
+`XDEBUG_MODE=off` and `APP_ENV=production`, and renders the FPM/web-server configs from
+`configs/*.tpl`). The configs mirror TechEmpower's Laravel reference
 (`opcache.validate_timestamps=0`, `save_comments=0`, `enable_file_override=1`,
 `huge_code_pages=1`, `jit_buffer_size=128M`, `opcache.preload`, classmap-authoritative
-autoloader). The web servers route every request straight to `public/index.php` over
-the FPM socket (no `try_files`/`mod_rewrite` filesystem stat).
+autoloader). The web servers route every request straight to `public/index.php` over the FPM
+socket (no `try_files`/`mod_rewrite` filesystem stat).
 
 - **Xdebug must be off in FPM.** If `xdebug` is enabled in the FPM SAPI it overrides
   `zend_execute_ex`, force-disabling JIT and adding heavy per-opcode overhead, which
-  cuts Laravel throughput several-fold. The launcher starts FPM with `XDEBUG_MODE=off`
-  to prevent this; verify with `php-fpm8.4 -i | grep xdebug`.
+  cuts Laravel throughput several-fold. The image starts FPM with `XDEBUG_MODE=off`
+  to prevent this; Xdebug is not installed in the image at all.
 - **JIT is effectively noise for this stateless per-request workload** (tracing vs off
   stays within the run-to-run band). The real lever is Xdebug-off + opcache, not JIT.
 - **nginx is the faster front; Apache trails somewhat.** Apache needs a warm thread pool
   (`StartServers`/`MinSpareThreads`); `mod_proxy_fcgi enablereuse=on` *hurt* (serialized
   the unix socket) and is left off.
 - **The DB routes (`/db`,`/query`) plateau well below the static routes** — bottlenecked
-  on the per-request Postgres *connect* (Laravel opens a fresh connection each request),
-  not on opcode execution.
+  on the per-request Postgres *connect* (the FPM variants open a fresh connection each
+  request), not on opcode execution. `laravel-octane` is the exception: persistent Swoole
+  workers, not per-request FPM, so it does not pay that per-request connect cost.
 
 Absolute throughput is environment-dependent — run the suite on your own hardware. JIT is
 exposed as `FPM_JIT` precisely so you can confirm the tracing-vs-off result for your box.
@@ -642,7 +664,7 @@ PASS: database wait did not block the single HTTP worker.
 
 - **CPU balance**: both the load generator and the server share CPU. The default uses `nproc / 2` workers to leave cores for the load generator.
 - **TCP_Client runner**: uses Bootgly's built-in TCP client — no external tooling required. Loads are PHP scripts under `loads/techempower/` or `loads/benchmark/`.
-- **WSL2**: `lsof` may not detect Go-based binaries (FrankenPHP, RoadRunner). The runner uses `curl` polling as fallback.
+- **Docker opponents**: every cross-framework opponent runs in a container (`--network host`, binding `:8082` directly); it is started in the foreground (the container is the daemon) and stopped with `docker rm -f <container>`. `lsof` may not see the in-container listener (this also covered the old native Go binaries, FrankenPHP / RoadRunner, which now run inside images), so the runner uses `curl` polling on `:8082` as readiness/liveness fallback.
 - **Localhost loopback**: all tests run on `127.0.0.1` — network latency is not a factor.
 - **Swoole extension**: must be compiled with CLI support. Verify with `php -m | grep swoole`.
 - **Hyperf**: requires Swoole with `swoole.use_shortname=Off`. Add to `php.ini` before running.

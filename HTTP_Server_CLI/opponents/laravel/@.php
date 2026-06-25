@@ -47,3 +47,9 @@ $Runner->add(new Opponent(
    version: $laravelVersion,
    script: __DIR__ . '/laravel-octane.php',
 ));
+
+$Runner->add(new Opponent(
+   name: 'Laravel (OLS)',
+   version: $laravelVersion,
+   script: __DIR__ . '/laravel-ols.php',
+));

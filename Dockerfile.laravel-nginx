@@ -1,0 +1,104 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# bootgly/bootgly_benchmarks:laravel-nginx — Laravel + nginx + PHP-FPM 8.4
+#
+# nginx (event-driven) fronting PHP-FPM 8.4 (per-request mode) for the Laravel
+# TechEmpower app. Every request is passed straight to public/index.php over a
+# unix fastcgi socket (no try_files / no filesystem stat), mirroring the native
+# nginx opponent and TechEmpower's Laravel nginx.conf. /db, /query, /updates
+# hit PHP-FPM + PostgreSQL (correct TFB semantics).
+#
+# Build context = the Laravel app dir (so `COPY . /app` carries the app + the
+# configs/*.tpl templates baked into the image):
+#   docker build -f Dockerfile.laravel-nginx -t bootgly-laravel-nginx \
+#     HTTP_Server_CLI/bootables/laravel
+#
+# Run (host network so it reaches host PostgreSQL at 127.0.0.1:5432 and binds
+# 8082 directly — fair, no NAT):
+#   docker run --rm --network host -e BOOTGLY_WORKERS=15 \
+#     -e DB_CONNECTION=pgsql -e DB_HOST=127.0.0.1 -e DB_PORT=5432 \
+#     -e DB_DATABASE=bootgly -e DB_USERNAME=postgres -e DB_PASSWORD= \
+#     --name bench-laravel-nginx bootgly-laravel-nginx
+#
+# The container runs php-fpm (background) + nginx (foreground) — the container
+# IS the daemon, so neither server daemonizes. BOOTGLY_WORKERS maps to the FPM
+# pool size (pm.max_children); nginx worker_processes track it too.
+# ============================================================================
+
+FROM php:8.4-fpm
+
+# ! PostgreSQL PDO extension + nginx + composer toolchain
+#   libpq5 (pdo_pgsql runtime) is kept; only the -dev/build tools are purged.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends libpq-dev git unzip ca-certificates nginx; \
+    docker-php-ext-install -j"$(nproc)" pdo_pgsql; \
+    apt-get purge -y libpq-dev; \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ! Laravel app (build context = the app dir) + vendor (re)built no-dev in-image
+ENV APP=/app
+COPY . $APP
+RUN set -eux; \
+    cd "$APP"; \
+    rm -rf bootstrap/cache/*.php run; \
+    composer install --no-interaction --no-progress --no-dev --optimize-autoloader; \
+    mkdir -p "$APP/run/body" "$APP/run/fastcgi" \
+      storage/framework/cache storage/framework/sessions storage/framework/views storage/logs
+
+# ! Bake server config from the rendered configs/*.tpl templates.
+#   Placeholders are pre-substituted to the in-image paths / port 8082; the
+#   {{CHILDREN}} and {{WORKERS}} placeholders stay so the entrypoint can size
+#   the pool from BOOTGLY_WORKERS at runtime. www-data is the FPM/php user.
+RUN set -eux; \
+    cd "$APP"; \
+    sed \
+      -e 's#{{RUN}}#/app/run#g' \
+      -e 's#{{ROOT}}#/app/public#g' \
+      -e 's#{{PORT}}#8082#g' \
+      -e 's#{{APP}}#/app#g' \
+      -e 's#{{USER}}#www-data#g' \
+      configs/php-fpm.conf.tpl > /app/run/php-fpm.conf.tpl; \
+    sed \
+      -e 's#{{RUN}}#/app/run#g' \
+      -e 's#{{ROOT}}#/app/public#g' \
+      -e 's#{{PORT}}#8082#g' \
+      -e 's#{{NGINX_PREFIX}}#/etc/nginx#g' \
+      configs/nginx.conf.tpl > /app/run/nginx.conf.tpl; \
+    chown -R www-data:www-data "$APP"
+
+# ! Entrypoint: map DB_* + worker count, render the final configs, start
+#   php-fpm in the background then nginx in the FOREGROUND (container = daemon).
+#   Generic vs TechEmpower selection is a no-op for Laravel (the front
+#   controller serves the same web.php routes for both sets), but the
+#   BOOTGLY_HTTP_SERVER_CLI_ROUTER env is honored/echoed for parity with the
+#   other Docker opponents.
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'CHILDREN="${BOOTGLY_WORKERS:-$(nproc)}"' \
+  'ROUTER="${BOOTGLY_HTTP_SERVER_CLI_ROUTER:-techempower}"' \
+  'echo "[laravel-nginx] router=${ROUTER} fpm.pm.max_children=${CHILDREN}"' \
+  'sed -e "s#{{CHILDREN}}#${CHILDREN}#g" -e "s#{{JIT}}#${FPM_JIT:-tracing}#g" \' \
+  '    /app/run/php-fpm.conf.tpl > /app/run/php-fpm.conf' \
+  '# The pool template has no user/group (native runs as the invoking user); the' \
+  '# container master starts as root, so drop privileges to www-data and let the' \
+  '# nginx workers (also www-data) read the unix fastcgi socket.' \
+  'printf "%s\\n" "user = www-data" "group = www-data" \' \
+  '  "listen.owner = www-data" "listen.group = www-data" >> /app/run/php-fpm.conf' \
+  'sed -e "s#{{WORKERS}}#${CHILDREN}#g" \' \
+  '    /app/run/nginx.conf.tpl > /app/run/nginx.conf' \
+  '# Run nginx in the FOREGROUND (container = daemon) and as www-data so the' \
+  '# workers can read the www-data-owned unix fastcgi socket (master is root).' \
+  'sed -i "s/^daemon on;/daemon off;/" /app/run/nginx.conf' \
+  'sed -i "1iuser www-data www-data;" /app/run/nginx.conf' \
+  '# php-fpm self-daemonizes (daemonize = yes in the pool) → background.' \
+  'php-fpm -y /app/run/php-fpm.conf' \
+  '# nginx in the FOREGROUND (daemon off above) — the container IS the daemon.' \
+  'exec nginx -p /app/run -c /app/run/nginx.conf' \
+  > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENV APP_ENV=production XDEBUG_MODE=off
+EXPOSE 8082
+ENTRYPOINT ["/entrypoint.sh"]

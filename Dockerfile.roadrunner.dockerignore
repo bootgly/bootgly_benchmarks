@@ -1,0 +1,6 @@
+# Resolve PHP deps + fetch the rr Go binary fresh in-image. Exclude the host
+# vendor/, the gitignored host `rr` binary (55MB, host-arch) and the .pid so
+# the build context stays small and the image is self-consistent.
+vendor/
+rr
+.pid

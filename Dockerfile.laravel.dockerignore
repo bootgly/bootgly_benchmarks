@@ -1,2 +1,0 @@
-# The laravel image builds entirely FROM bootgly:full + RUN; no context files.
-*

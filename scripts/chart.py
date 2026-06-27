@@ -105,6 +105,9 @@ LOAD_ANNOTATIONS: dict[str, tuple[str, str]] = {
     "Mixed (5 static + 3 dynamic)":     ("/mixed-8",     "5 static + 3 dynamic"),
     "Mixed (10 static + 10 dynamic)":   ("/mixed-20",    "10 static + 10 dynamic"),
     "Full mix (all types)":             ("/full",        "static + dynamic + nested"),
+    # Raw socket loads (TCP_Server_CLI / UDP_Server_CLI).
+    "Echo 32 bytes":             ("echo",  "32B round-trip"),
+    "HTTP raw (Hello World)":    ("GET /", "fixed 200 OK, no routing"),
 }
 
 
@@ -249,7 +252,31 @@ def detect_environment(opponents: list[str]) -> dict[str, str]:
 # Charts
 # ----------------------------------------------------------------------------
 
-def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponents, data, yscale="linear"):
+def _render_titles(fig, title: str, subtitle: str) -> None:
+    """Bold suptitle plus an optional dimmer info line below it, with a gap."""
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.985)
+    if subtitle:
+        fig.text(0.5, 0.915, subtitle, ha="center", va="top", fontsize=10, color="#555555")
+
+
+def _build_subtitle(loads, shared, x_key) -> str:
+    """Info line: the exact load name (when a single load) followed by the
+    constant sweep config, excluding the swept (X) axis."""
+    bits = []
+    if len(loads) == 1:
+        bits.append(loads[0])
+    for key, fmt in (
+        ("connections", "{} connections"),
+        ("server-workers", "{} server-workers"),
+        ("client-workers", "{} client-workers"),
+        ("duration", "{} s"),
+    ):
+        if key != x_key and key in shared:
+            bits.append(fmt.format(shared[key]))
+    return " · ".join(bits)
+
+
+def plot_throughput(path: Path, title: str, subtitle: str, x_key: str, x_values, loads, opponents, data, yscale="linear"):
     n = len(loads)
     if n <= 1:
         cols = 1
@@ -260,7 +287,7 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponen
     rows = (n + cols - 1) // cols
 
     fig, axes = plt.subplots(rows, cols, figsize=(6.0 * cols, 4.2 * rows), squeeze=False)
-    fig.suptitle(title, fontsize=14, fontweight="bold")
+    _render_titles(fig, title, subtitle)
 
     for i, load in enumerate(loads):
         ax = axes[i // cols][i % cols]
@@ -279,7 +306,13 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponen
             ax.yaxis.set_major_formatter(_INT_TICKS)
             ax.yaxis.set_minor_formatter(plt.NullFormatter())
         else:
-            ax.set_ylim(bottom=0)
+            # Headroom above the tallest point so its marker is not clipped by
+            # the top spine.
+            ymax = max(
+                (float(v) for c in opponents for v in data[load][c] if v is not None),
+                default=0.0,
+            )
+            ax.set_ylim(bottom=0, top=ymax * 1.08 if ymax > 0 else None)
             # Plain integer ticks (e.g. 1,000,000) instead of 0.2 … ×1e6.
             ax.ticklabel_format(style="plain", axis="y")
             ax.yaxis.set_major_formatter(_INT_TICKS)
@@ -287,12 +320,12 @@ def plot_throughput(path: Path, title: str, x_key: str, x_values, loads, opponen
     for k in range(n, rows * cols):
         axes[k // cols][k % cols].set_visible(False)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.87) if subtitle else (0, 0, 1, 1))
     plt.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_latency(path: Path, title: str, x_key: str, x_values, loads, opponents, data_latency, yscale="log"):
+def plot_latency(path: Path, title: str, subtitle: str, x_key: str, x_values, loads, opponents, data_latency, yscale="log"):
     n = len(loads)
     if n <= 1:
         cols = 1
@@ -303,7 +336,7 @@ def plot_latency(path: Path, title: str, x_key: str, x_values, loads, opponents,
     rows = (n + cols - 1) // cols
 
     fig, axes = plt.subplots(rows, cols, figsize=(6.0 * cols, 4.2 * rows), squeeze=False)
-    fig.suptitle(title, fontsize=14, fontweight="bold")
+    _render_titles(fig, title, subtitle)
 
     for i, load in enumerate(loads):
         ax = axes[i // cols][i % cols]
@@ -330,7 +363,7 @@ def plot_latency(path: Path, title: str, x_key: str, x_values, loads, opponents,
     for k in range(n, rows * cols):
         axes[k // cols][k % cols].set_visible(False)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.87) if subtitle else (0, 0, 1, 1))
     plt.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
@@ -503,6 +536,7 @@ def write_report(
         ("Load set", "load-set"),
         ("Connections", "connections"),
         ("Duration", "duration"),
+        ("Server workers", "server-workers"),
         ("Client workers", "client-workers"),
         ("Pipeline", "pipeline"),
         ("DB pool max", "db-pool-max"),
@@ -733,10 +767,16 @@ def main() -> int:
     report_name = f"{base_name}.md"
 
     title = args.title or f"{case} — {load_set} sweep over {x_key}"
+    shared = {
+        k: v
+        for k, v in (parsed[0]["config"].items() if parsed else [])
+        if k != x_key and all(p["config"].get(k) == v for p in parsed)
+    }
+    subtitle = _build_subtitle(loads, shared, x_key)
 
-    plot_throughput(out_dir / chart_throughput_name, title, x_key, x_values, loads, opponents, data, yscale=args.yscale)
+    plot_throughput(out_dir / chart_throughput_name, title, subtitle, x_key, x_values, loads, opponents, data, yscale=args.yscale)
     plot_ratio(out_dir / chart_ratio_name, title, x_key, x_values, loads, opponents, data, baseline)
-    plot_latency(out_dir / chart_latency_name, f"{title} — latency", x_key, x_values, loads, opponents, data_latency, yscale="log")
+    plot_latency(out_dir / chart_latency_name, f"{title} — latency", subtitle, x_key, x_values, loads, opponents, data_latency, yscale="log")
     write_report(
         out_dir / report_name,
         chart_throughput_name,

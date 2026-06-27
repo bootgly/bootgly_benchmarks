@@ -1,3 +1,4 @@
 cache/
 vendor/
 .venv/
+__pycache__/

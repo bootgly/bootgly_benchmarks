@@ -19,12 +19,16 @@ Benchmarks | Interface | Result
 [Template Engine - foreach][BENCHMARK_02] | ABI | ≈ 9x faster than Laravel Blade (without sacrificing features)
 [HTTP Server CLI][BENCHMARK_03] | WPI | TechEmpower benchmark: 6 canonical routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`) vs opponents
 [Cache][BENCHMARK_04] | ABI | Per-driver × per-operation matrix (File / APCu / Shared / Redis): store, fetch, increment, tags, resolve, ...
+[TCP Server CLI][BENCHMARK_05] | WPI | Raw socket-level throughput (accept, read, write, close) — no HTTP routing/middleware. Loads: echo + raw HTTP
+[UDP Server CLI][BENCHMARK_06] | WPI | Raw datagram echo throughput — no TCP framing. One datagram in → one echoed out
 
 <!-- Links -->
 [BENCHMARK_01]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Progress_Bar/README.md
 [BENCHMARK_02]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Template_Engine/README.md
 [BENCHMARK_03]: https://github.com/bootgly/bootgly_benchmarks/tree/main/HTTP_Server_CLI/README.md
 [BENCHMARK_04]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Cache/README.md
+[BENCHMARK_05]: https://github.com/bootgly/bootgly_benchmarks/tree/main/TCP_Server_CLI/README.md
+[BENCHMARK_06]: https://github.com/bootgly/bootgly_benchmarks/tree/main/UDP_Server_CLI/README.md
 
 ---
 
@@ -56,6 +60,8 @@ Available cases:
 
 ```bash
 ./bootgly test benchmark HTTP_Server_CLI
+./bootgly test benchmark TCP_Server_CLI
+./bootgly test benchmark UDP_Server_CLI
 ./bootgly test benchmark Progress_Bar
 ./bootgly test benchmark Template_Engine
 ./bootgly test benchmark Cache

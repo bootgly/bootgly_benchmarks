@@ -32,22 +32,8 @@ match ($action) {
          $env .= "BOOTGLY_WORKERS={$workers} ";
       }
 
-      // # Router — derive from the active load set so the server serves exactly
-      //   the routes the client will hit. LOADS (the client's route files) and
-      //   ROUTER (the server's routes) are separate vars; without this link a
-      //   `techempower` run boots the default router and every TechEmpower route
-      //   404s (preflight N/A). An explicit BOOTGLY_HTTP_SERVER_CLI_ROUTER wins.
-      $router = getenv('BOOTGLY_HTTP_SERVER_CLI_ROUTER');
-      if ($router === false) {
-         $loadSet = strtolower(getenv('BENCHMARK_LOAD_SET') ?: 'benchmark');
-         $router = match ($loadSet) {
-            'techempower' => 'techempower',
-            default       => 'bootgly',
-         };
-      }
-      $env .= "BOOTGLY_HTTP_SERVER_CLI_ROUTER={$router} ";
-
-      // @ Start server via bootgly project command
+      // @ Start server via bootgly project command. The server derives its router
+      //   from the active load set (BENCHMARK_LOAD_SET), inherited from this env.
       exec("{$env}php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI start > /dev/null 2>&1");
    })(),
 

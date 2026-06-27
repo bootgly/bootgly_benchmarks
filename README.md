@@ -67,6 +67,12 @@ Available cases:
 ./bootgly test benchmark Cache
 ```
 
+> **Docker (cross-framework):** the `HTTP_Server_CLI` case runs its cross-framework
+> opponents (Swoole, Hyperf, Workerman, FrankenPHP, Laravel, …) in **Docker** — each
+> image **auto-builds on first run**, so only a running Docker daemon is needed (Bootgly
+> itself stays native, no Docker). See the
+> [HTTP Server CLI Docker Quickstart][BENCHMARK_03] for copy-paste commands.
+
 ### 3. Get help
 
 ```bash

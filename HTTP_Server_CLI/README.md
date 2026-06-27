@@ -9,6 +9,51 @@ Select the set in the **required** `--loads=<set>:<indexes>` option — `<set>` 
 
 ---
 
+## 🐳 Quickstart (0 setup with Docker)
+
+**One command. No install, no config, no database setup.** Copy, paste, run — it pulls a
+self-contained image (Bootgly + the opponent + PostgreSQL, which **boots and seeds itself**)
+and prints the full benchmark: Bootgly vs the opponent, static **and** database routes.
+
+Benchmark Bootgly against **Swoole** using the `TechEmpower` load set:
+
+```bash
+docker run --rm bootgly/bootgly_benchmarks:swoole \
+   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-base --loads=techempower:*
+```
+
+The only requirement is a running Docker daemon.
+
+### Run another opponent
+
+Same command — replace `<image>` with the opponent's image tag and `<opponent>` with its name:
+
+```bash
+docker run --rm bootgly/bootgly_benchmarks:<image> \
+   test benchmark HTTP_Server_CLI --opponents=bootgly,<opponent> --loads=techempower:*
+```
+
+| `<image>` | `<opponent>` | Published |
+|-----------|--------------|:---------:|
+| `swoole` | `swoole-base` | ✅ |
+| `workerman` | `workerman` | ⏳ |
+| `roadrunner` | `roadrunner` | ⏳ |
+| `frankenphp` | `frankenphp` | ⏳ |
+| `hyperf` | `hyperf` | ⏳ |
+| `laravel-nginx` | `laravel-nginx` | ⏳ |
+
+> ✅ published to Docker Hub · ⏳ rolling out (only `swoole` so far). Each lands as its
+> opponent is validated in the single-image, in-process model.
+
+### Common tweaks
+
+- **Tuning** passes straight through: `--server-workers=15 --connections=512 --duration=10`.
+- **Static only** (skip the DB): `--loads=techempower:1,2` (plaintext + JSON).
+- **Override the DB** (use an external PostgreSQL instead of the bundled one):
+  `-e DB_HOST=… -e DB_PORT=… -e DB_NAME=… -e DB_USER=… -e DB_PASS=…`.
+
+---
+
 ## 📋 Table of Contents
 
 - [Prerequisites](#-prerequisites)

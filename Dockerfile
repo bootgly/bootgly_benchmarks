@@ -62,11 +62,11 @@ RUN set -eux; \
 #   is already installed above; here only the swoole pecl build deps are added + purged.
 RUN if [ "$WITH_SWOOLE" = "1" ] || [ "$WITH_HYPERF" = "1" ]; then set -eux; \
       apt-get update; \
-      apt-get install -y --no-install-recommends $PHPIZE_DEPS libbrotli-dev; \
+      apt-get install -y --no-install-recommends $PHPIZE_DEPS libbrotli-dev libssl-dev; \
       pecl install swoole; \
       docker-php-ext-enable swoole; \
       printf 'swoole.use_shortname=Off\n' > /usr/local/etc/php/conf.d/zz-swoole.ini; \
-      apt-get purge -y $PHPIZE_DEPS libbrotli-dev; \
+      apt-get purge -y $PHPIZE_DEPS libbrotli-dev libssl-dev; \
       rm -rf /var/lib/apt/lists/* /tmp/pear; \
     fi
 

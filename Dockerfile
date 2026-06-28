@@ -114,8 +114,17 @@ if [ -n "$PGBIN" ]; then
       install -d -o postgres -g postgres "$PGDATA"
       runuser -u postgres -- "$PGBIN/initdb" -D "$PGDATA" -A trust -U postgres --no-sync >/dev/null
    fi
+   # Scale max_connections to the host. Bootgly runs ~nproc/2 workers, each an async
+   # event loop with a DB pool of up to 8 connections (ADI\Database DEFAULT_POOL_MAX),
+   # so the held-connection routes (/query, /updates pipeline N reads on one pooled
+   # connection) peak around nproc*4 open connections — plus idle pooled connections
+   # carried over between loads and short bursts. PostgreSQL's default cap (100) is far
+   # too low on many-core hosts and surfaces as HTTP 500 ("sorry, too many clients
+   # already") on exactly those routes. Give generous headroom (like the TechEmpower
+   # reference PG configs), scaled to the box so small hosts still start cleanly.
+   MAXC=$(( $(nproc 2>/dev/null || echo 4) * 8 + 256 ))
    runuser -u postgres -- "$PGBIN/pg_ctl" -D "$PGDATA" \
-      -o "-c listen_addresses=127.0.0.1 -p $DB_PORT -k /tmp" -w -t 25 start >/dev/null
+      -o "-c listen_addresses=127.0.0.1 -p $DB_PORT -k /tmp -c max_connections=$MAXC" -w -t 25 start >/dev/null
    runuser -u postgres -- "$PGBIN/createdb" -h 127.0.0.1 -p "$DB_PORT" -U postgres "$DB_NAME" 2>/dev/null || true
 fi
 

@@ -4,9 +4,9 @@
 #
 # One image that runs the WHOLE benchmark in a single `docker run` — Bootgly
 # plus one opponent, all in-process on loopback, no host setup. Competitor
-# runtimes (Swoole, Workerman, RoadRunner, FrankenPHP, Hyperf and PostgreSQL)
-# live ONLY in this image — never in bootgly:slim / bootgly:full, which stay
-# dependency-free. Opt in per opponent with build ARGs.
+# runtimes (Swoole, Workerman, RoadRunner, FrankenPHP, Hyperf, ReactPHP, AMPHP,
+# Laravel Octane and PostgreSQL) live ONLY in this image — never in bootgly:slim / bootgly:full,
+# which stay dependency-free. Opt in per opponent with build ARGs.
 #
 # BOOTGLY_BENCH_INPROCESS=1 makes the opponent scripts launch their server
 # natively (no docker-in-docker), so the runner spawns every server locally and
@@ -35,6 +35,9 @@ ARG WITH_WORKERMAN=0
 ARG WITH_ROADRUNNER=0
 ARG WITH_FRANKENPHP=0
 ARG WITH_HYPERF=0
+ARG WITH_REACTPHP=0
+ARG WITH_AMPHP=0
+ARG WITH_LARAVEL_OCTANE=0
 
 # ! Composer (build-time) for opponents that vendor PHP packages
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -60,7 +63,7 @@ RUN set -eux; \
 # # Opponents
 # ! Swoole — cross-framework opponent (also the runtime Hyperf is built on). pdo_pgsql
 #   is already installed above; here only the swoole pecl build deps are added + purged.
-RUN if [ "$WITH_SWOOLE" = "1" ] || [ "$WITH_HYPERF" = "1" ]; then set -eux; \
+RUN if [ "$WITH_SWOOLE" = "1" ] || [ "$WITH_HYPERF" = "1" ] || [ "$WITH_LARAVEL_OCTANE" = "1" ]; then set -eux; \
       apt-get update; \
       apt-get install -y --no-install-recommends $PHPIZE_DEPS libbrotli-dev libssl-dev; \
       pecl install swoole; \
@@ -79,7 +82,8 @@ RUN if [ "$WITH_WORKERMAN" = "1" ]; then set -eux; \
 # ! RoadRunner — composer vendor + the `rr` Go binary
 RUN if [ "$WITH_ROADRUNNER" = "1" ]; then set -eux; \
       apt-get update; apt-get install -y --no-install-recommends git unzip; rm -rf /var/lib/apt/lists/*; \
-      cd "$BOOTABLES/roadrunner"; composer install --no-interaction --no-progress; php ./vendor/bin/rr get-binary; \
+      cd "$BOOTABLES/roadrunner"; composer install --no-interaction --no-progress; \
+      php ./vendor/bin/rr get-binary; chmod +x ./rr; \
     fi
 
 # ! Hyperf — Swoole framework (Swoole already installed above), composer vendor
@@ -93,6 +97,38 @@ RUN if [ "$WITH_FRANKENPHP" = "1" ]; then set -eux; \
       curl -fsSL https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64 \
         -o /usr/local/bin/frankenphp; \
       chmod +x /usr/local/bin/frankenphp; \
+    fi
+
+# ! ReactPHP — pure-PHP async (react/*, voryx/pgasync over the wire protocol). pcntl +
+#   sockets are already in the base image, so only the composer vendor is added here.
+RUN if [ "$WITH_REACTPHP" = "1" ]; then set -eux; \
+      apt-get update; apt-get install -y --no-install-recommends git unzip; rm -rf /var/lib/apt/lists/*; \
+      cd "$BOOTABLES/reactphp"; composer install --no-interaction --no-progress --no-dev; \
+    fi
+
+# ! AMPHP — Amp v3 fibers; amphp/postgres needs ext-pgsql (the `pgsql` extension, NOT
+#   pdo_pgsql). pcntl is already in the base; libpq5 (ext-pgsql runtime) stays alive via
+#   postgresql-client, so only the libpq-dev header + phpize deps are added then purged.
+RUN if [ "$WITH_AMPHP" = "1" ]; then set -eux; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends $PHPIZE_DEPS libpq-dev git unzip; \
+      docker-php-ext-install -j"$(nproc)" pgsql; \
+      cd "$BOOTABLES/amphp"; composer install --no-interaction --no-progress --no-dev; \
+      apt-get purge -y $PHPIZE_DEPS libpq-dev; apt-get autoremove -y; \
+      rm -rf /var/lib/apt/lists/* /tmp/pear; \
+    fi
+
+# ! Laravel Octane — Swoole-served Laravel (swoole installed above; pdo_pgsql from the PG
+#   block, pcntl in the base). composer vendors laravel/octane + the runtime tree; clear
+#   the bootstrap cache and create the storage dirs Octane expects.
+RUN if [ "$WITH_LARAVEL_OCTANE" = "1" ]; then set -eux; \
+      apt-get update; apt-get install -y --no-install-recommends git unzip; rm -rf /var/lib/apt/lists/*; \
+      cd "$BOOTABLES/laravel"; rm -rf bootstrap/cache/*.php; \
+      for i in 1 2 3; do \
+        composer install --no-interaction --no-progress --no-dev --optimize-autoloader && break; \
+        echo "composer retry $i"; sleep 5; \
+      done; \
+      mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs run; \
     fi
 
 # # Entrypoint

@@ -67,11 +67,11 @@ Available cases:
 ./bootgly test benchmark Cache
 ```
 
-> **Docker (cross-framework):** the `HTTP_Server_CLI` case runs its cross-framework
-> opponents (Swoole, Hyperf, Workerman, FrankenPHP, Laravel, …) in **Docker** — each
-> image **auto-builds on first run**, so only a running Docker daemon is needed (Bootgly
-> itself stays native, no Docker). See the
-> [HTTP Server CLI Docker Quickstart][BENCHMARK_03] for copy-paste commands.
+> **Docker (cross-framework):** the `HTTP_Server_CLI` case ships each cross-framework
+> opponent (Swoole, Hyperf, Workerman, RoadRunner, ReactPHP, AMPHP, Laravel Octane) as a
+> **self-contained image** — `bootgly/bootgly_benchmarks:<opponent>` bundles Bootgly + the
+> opponent runtime + PostgreSQL and runs the whole benchmark from one `docker run` (zero
+> host setup). See the [HTTP Server CLI Docker Quickstart][BENCHMARK_03] for copy-paste commands.
 
 ### 3. Get help
 

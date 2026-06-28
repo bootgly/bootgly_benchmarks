@@ -1,55 +1,51 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — HTTP_Server_CLI — ReactPHP Opponent (Docker)
+ * Bootgly Benchmarks — HTTP_Server_CLI — ReactPHP Opponent
  * --------------------------------------------------------------------------
  *
- * Runs the ReactPHP bootable inside a Docker container — kept off the host to
- * avoid polluting it with the composer vendor tree (PgAsync is pure PHP, so no
- * build toolchain is needed beyond ext-pcntl/ext-sockets baked into the
- * image). The container runs the async TechEmpower server in the FOREGROUND
- * (the container IS the daemon).
+ * Runs the ReactPHP bootable in-process inside the self-contained bench image
+ * (bootgly/bootgly_benchmarks:reactphp), where react/* and voryx/pgasync are
+ * vendored natively — no docker-in-docker. The async PostgreSQL client speaks
+ * the wire protocol over a TCP socket (pure PHP, no pdo_pgsql).
  *
- * This opponent only serves the TechEmpower route set — there is no generic
- * router branch — so no BOOTGLY_HTTP_SERVER_CLI_ROUTER is forwarded.
+ * TechEmpower only — there is no generic router branch: this opponent always
+ * runs reactphp-techempower.php in the FOREGROUND (the runner backgrounds it
+ * with `&`). It forks BOOTGLY_WORKERS children (each its own event loop on :8082).
  *
- * Container uses --network host: binds :8082 directly and reaches host
- * PostgreSQL at 127.0.0.1:5432 (no NAT — fair).
+ * Image-only: run through the Docker image, never on a bare host —
+ *   docker run --rm bootgly/bootgly_benchmarks:reactphp test benchmark \
+ *     HTTP_Server_CLI --opponents=bootgly,reactphp --loads=techempower:*
  *
- * Usage:
+ * Usage (inside the image, invoked by the runner):
  *   php reactphp.php start
  *   php reactphp.php stop
- *
- * Requires a running Docker daemon. The image is built once (if missing) on
- * first start — pre-build it before a sweep so the first round is not stalled:
- *   docker build -f ../../../Dockerfile.reactphp -t bootgly-reactphp \
- *     ../../bootables/reactphp
  */
 
 $bootablesDir = realpath(__DIR__ . '/../../bootables/reactphp');
-$dockerfile = realpath(__DIR__ . '/../../..') . '/Dockerfile.reactphp';
-$image = 'bootgly-reactphp';
-$container = 'bench-reactphp';
+$bootable = 'reactphp-techempower.php';
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
+// ? Image-only: this opponent runs natively inside the self-contained bench image
+//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
+if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+   fwrite(STDERR,
+      "The ReactPHP opponent runs only inside the bootgly/bootgly_benchmarks:reactphp image.\n"
+      . "Run: docker run --rm bootgly/bootgly_benchmarks:reactphp test benchmark HTTP_Server_CLI "
+      . "--opponents=bootgly,reactphp --loads=techempower:*\n"
+   );
+   exit(1);
+}
+
 $action = $argv[1] ?? 'start';
 
 match ($action) {
-   'start' => (function () use ($bootablesDir, $dockerfile, $image, $container, $workers) {
-      // # Build the image once if it is not present yet.
-      exec("docker image inspect {$image} > /dev/null 2>&1", $out, $code);
-      if ($code !== 0) {
-         exec("docker build -f {$dockerfile} -t {$image} {$bootablesDir} > /dev/null 2>&1");
-      }
-
-      // @ Remove any stale container, then run fresh.
-      exec("docker rm -f {$container} > /dev/null 2>&1");
-
-      // # DB env the bootable reads (DB_HOST/PORT/NAME/USER/PASS); host PG via host network.
+   // @ Launch the async TechEmpower server in the foreground (the runner backgrounds it).
+   'start' => (function () use ($bootablesDir, $workers, $bootable) {
       $db = sprintf(
-         '-e DB_HOST=%s -e DB_PORT=%s -e DB_NAME=%s -e DB_USER=%s -e DB_PASS=%s',
+         'DB_HOST=%s DB_PORT=%s DB_NAME=%s DB_USER=%s DB_PASS=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
          escapeshellarg(getenv('DB_PORT') ?: '5432'),
          escapeshellarg(getenv('DB_NAME') ?: 'bootgly'),
@@ -57,16 +53,15 @@ match ($action) {
          escapeshellarg(getenv('DB_PASS') ?: '')
       );
 
-      // # Worker count → BOOTGLY_WORKERS (the bootable forks this many children).
       exec(
-         "docker run -d --network host --name {$container} "
-         . '-e BOOTGLY_WORKERS=' . escapeshellarg($workers) . ' '
-         . "{$db} {$image} > /dev/null 2>&1"
+         "cd {$bootablesDir} && {$db}BOOTGLY_WORKERS={$workers} "
+         . "php {$bootable} > /dev/null 2>&1"
       );
    })(),
 
-   'stop' => (function () use ($container, $port) {
-      exec("docker rm -f {$container} > /dev/null 2>&1");
+   // @ Kill the bootable (and its forked workers) by argv pattern, then free the port.
+   'stop' => (function () use ($port, $bootable) {
+      exec('pkill -9 -f ' . escapeshellarg($bootable) . ' > /dev/null 2>&1');
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
    })(),
 

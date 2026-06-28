@@ -4,9 +4,9 @@
  * Bootgly Benchmarks — HTTP_Server_CLI — Laravel Opponents
  * --------------------------------------------------------------------------
  *
- * The same Laravel app (bootables/laravel) fronted by different web servers.
- * The nginx/Apache variants run per-request (PHP-FPM, no persistent worker);
- * the Octane variant runs persistent in-memory workers on Swoole.
+ * The Laravel app (bootables/laravel) served by Octane on Swoole — persistent
+ * in-memory workers, the fast Laravel stack. Runs in-process inside the
+ * self-contained bench image (bootgly/bootgly_benchmarks:laravel-octane).
  */
 
 use Bootgly\ACI\Tests\Benchmark\Opponent;
@@ -31,25 +31,7 @@ $laravelVersion = function (): string {
 };
 
 $Runner->add(new Opponent(
-   name: 'Laravel (nginx)',
-   version: $laravelVersion,
-   script: __DIR__ . '/laravel-nginx.php',
-));
-
-$Runner->add(new Opponent(
-   name: 'Laravel (Apache)',
-   version: $laravelVersion,
-   script: __DIR__ . '/laravel-apache.php',
-));
-
-$Runner->add(new Opponent(
    name: 'Laravel (Octane)',
    version: $laravelVersion,
    script: __DIR__ . '/laravel-octane.php',
-));
-
-$Runner->add(new Opponent(
-   name: 'Laravel (OLS)',
-   version: $laravelVersion,
-   script: __DIR__ . '/laravel-ols.php',
 ));

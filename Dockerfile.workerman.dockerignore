@@ -1,4 +1,0 @@
-# Ship only the app sources; vendor/ is rebuilt in-image (composer install
-# --no-dev), and runtime logs must not pollute the build context.
-vendor/
-*.log

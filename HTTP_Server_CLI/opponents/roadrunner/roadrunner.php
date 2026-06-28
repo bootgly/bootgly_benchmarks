@@ -4,59 +4,54 @@
  * Bootgly Benchmarks — HTTP_Server_CLI — RoadRunner Opponent
  * --------------------------------------------------------------------------
  *
- * Runs RoadRunner (Spiral) inside a Docker container — the `rr` Go binary and
- * its PHP worker pool are kept off the host. The container runs `rr serve` in
- * the FOREGROUND (the container IS the daemon).
+ * Runs RoadRunner (Spiral) in-process inside the self-contained bench image
+ * (bootgly/bootgly_benchmarks:roadrunner), where the `rr` Go binary + its PHP
+ * worker pool live natively — no docker-in-docker. `rr serve` runs in the
+ * FOREGROUND (the runner backgrounds it with `&`); RoadRunner passes the parent
+ * env down to the workers, so DB_* reaches the PDO in the TechEmpower worker.
  *
- * Generic vs TechEmpower is selected exactly as the native runner did, via the
- * BOOTGLY_HTTP_SERVER_CLI_ROUTER env: forwarded into the container, the image
- * entrypoint branches on it to pick worker.php (generic) vs
- * worker-techempower.php (`-o server.command=php worker-techempower.php`).
- * RoadRunner passes the parent (container) env down to the workers, so the
- * forwarded DB_* vars reach the PDO in the TechEmpower worker.
+ * The worker is chosen from the active load set (BENCHMARK_LOAD_SET, set by
+ * `--loads=<set>:<indexes>`): techempower -> worker-techempower.php (raw PDO,
+ * the 7 TFB routes); any other set -> worker.php (generic route set, the .rr.yaml
+ * default).
  *
- * Container uses --network host: binds :8082 directly and reaches host
- * PostgreSQL at 127.0.0.1:5432 (no NAT — fair).
+ * Image-only: run through the Docker image, never on a bare host —
+ *   docker run --rm bootgly/bootgly_benchmarks:roadrunner test benchmark \
+ *     HTTP_Server_CLI --opponents=bootgly,roadrunner --loads=techempower:*
  *
- * Usage:
+ * Usage (inside the image, invoked by the runner):
  *   php roadrunner.php start
  *   php roadrunner.php stop
- *
- * Requires a running Docker daemon. The image is built once (if missing) on
- * first start — pre-build it before a sweep so the first round is not stalled:
- *   docker build -f ../../../Dockerfile.roadrunner -t bootgly-roadrunner \
- *     ../../bootables/roadrunner
  */
 
 $bootablesDir = realpath(__DIR__ . '/../../bootables/roadrunner');
-$dockerfile = realpath(__DIR__ . '/../../..') . '/Dockerfile.roadrunner';
-$image = 'bootgly-roadrunner';
-$container = 'bench-roadrunner';
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-// @ Honor the active router/load set. The entrypoint branches on this env to
-//   run worker-techempower.php (TechEmpower loads) vs worker.php (generic).
-$router = getenv('BOOTGLY_HTTP_SERVER_CLI_ROUTER') ?: '';
+// @ Worker from the active load set — techempower runs worker-techempower.php
+//   (raw PDO TFB routes), any other set runs the .rr.yaml default (worker.php).
+$techempower = strtolower(getenv('BENCHMARK_LOAD_SET') ?: '') === 'techempower';
+
+// ? Image-only: this opponent runs natively inside the self-contained bench image
+//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
+if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+   fwrite(STDERR,
+      "The RoadRunner opponent runs only inside the bootgly/bootgly_benchmarks:roadrunner image.\n"
+      . "Run: docker run --rm bootgly/bootgly_benchmarks:roadrunner test benchmark HTTP_Server_CLI "
+      . "--opponents=bootgly,roadrunner --loads=techempower:*\n"
+   );
+   exit(1);
+}
 
 $action = $argv[1] ?? 'start';
 
 match ($action) {
-   'start' => (function () use ($bootablesDir, $dockerfile, $image, $container, $workers, $router) {
-      // # Build the image once if it is not present yet.
-      exec("docker image inspect {$image} > /dev/null 2>&1", $out, $code);
-      if ($code !== 0) {
-         exec("docker build -f {$dockerfile} -t {$image} {$bootablesDir} > /dev/null 2>&1");
-      }
-
-      // @ Remove any stale container, then run fresh.
-      exec("docker rm -f {$container} > /dev/null 2>&1");
-
-      // # DB env (Bootgly DB_* names, read by worker-techempower.php's PDO);
-      //   host PostgreSQL reached via the host network.
+   // @ Serve in the foreground (the runner backgrounds it). For techempower swap the
+   //   pool command to the TFB worker; otherwise keep the .rr.yaml default.
+   'start' => (function () use ($bootablesDir, $workers, $techempower) {
       $db = sprintf(
-         '-e DB_HOST=%s -e DB_PORT=%s -e DB_NAME=%s -e DB_USER=%s -e DB_PASS=%s',
+         'DB_HOST=%s DB_PORT=%s DB_NAME=%s DB_USER=%s DB_PASS=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
          escapeshellarg(getenv('DB_PORT') ?: '5432'),
          escapeshellarg(getenv('DB_NAME') ?: 'bootgly'),
@@ -64,14 +59,22 @@ match ($action) {
          escapeshellarg(getenv('DB_PASS') ?: '')
       );
 
-      // # Forward the router selector so the entrypoint picks the right worker.
-      $routerEnv = '-e BOOTGLY_HTTP_SERVER_CLI_ROUTER=' . escapeshellarg($router);
+      $command = $techempower === true
+         ? ' -o "server.command=php worker-techempower.php"'
+         : '';
 
-      exec("docker run -d --network host --name {$container} -e BOOTGLY_WORKERS={$workers} {$routerEnv} {$db} {$image} > /dev/null 2>&1");
+      exec(
+         "cd {$bootablesDir} && {$db}"
+         . "./rr serve -c .rr.yaml -o http.address=0.0.0.0:8082 "
+         . "-o http.pool.num_workers={$workers}{$command} > /dev/null 2>&1"
+      );
    })(),
 
-   'stop' => (function () use ($container, $port) {
-      exec("docker rm -f {$container} > /dev/null 2>&1");
+   // @ Kill the rr supervisor (and its worker pool) by argv pattern, then free the port.
+   'stop' => (function () use ($port) {
+      exec("pkill -9 -f 'rr serve' > /dev/null 2>&1");
+      exec("pkill -9 -f 'worker-techempower.php' > /dev/null 2>&1");
+      exec("pkill -9 -f 'worker.php' > /dev/null 2>&1");
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
    })(),
 

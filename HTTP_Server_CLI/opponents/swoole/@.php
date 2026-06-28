@@ -4,8 +4,9 @@
  * Bootgly Benchmarks — HTTP_Server_CLI — Swoole Opponents
  * --------------------------------------------------------------------------
  *
- * Swoole ships several variations: Base / Process / Coroutine reactor modes
- * (router loads) and TechEmpower (PROCESS + PDO pool + /plaintext & /json).
+ * Swoole runs in-process inside the self-contained bench image
+ * (bootgly/bootgly_benchmarks:swoole): Base (SWOOLE_BASE reactor, router loads)
+ * and TechEmpower (SWOOLE_BASE + per-worker PDO pool, the 7 TFB routes).
  */
 
 use Bootgly\ACI\Tests\Benchmark\Opponent;
@@ -22,16 +23,6 @@ $Runner->add(new Opponent(
    name: 'Swoole (Base)',
    version: $swooleVersion,
    script: __DIR__ . '/swoole-base.php',
-));
-$Runner->add(new Opponent(
-   name: 'Swoole (Process)',
-   version: $swooleVersion,
-   script: __DIR__ . '/swoole-process.php',
-));
-$Runner->add(new Opponent(
-   name: 'Swoole (Coroutine)',
-   version: $swooleVersion,
-   script: __DIR__ . '/swoole-coroutine.php',
 ));
 $Runner->add(new Opponent(
    name: 'Swoole TechEmpower',

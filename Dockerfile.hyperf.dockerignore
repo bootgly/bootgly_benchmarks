@@ -1,6 +1,0 @@
-# Ship only the app sources; vendor/ is rebuilt in-image (composer install) and
-# Hyperf's runtime/ caches (container/aspect/scan caches, logs) must not leak
-# from the host into the build context.
-vendor/
-runtime/
-*.log

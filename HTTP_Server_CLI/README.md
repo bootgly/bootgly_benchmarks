@@ -284,6 +284,23 @@ The Swoole TechEmpower opponent requires PHP extensions `swoole` and `pdo_pgsql`
 (`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL
 pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 
+#### Fairness & caveats
+
+> **Pin `DB_POOL_MAX` for every opponent.** Bootgly defaults its connection pool to
+> `DEFAULT_POOL_MAX=8` per worker; the Swoole TechEmpower bootable defaults to **1**. When the
+> env is **set**, every opponent honors it exactly — verified: `DB_POOL_MAX=1` gives Bootgly
+> exactly **1 PostgreSQL connection per worker** (it is *not* forced to 8). So always pass the
+> **same** `DB_POOL_MAX` to all opponents; an unset-default-vs-unset-default run (8 vs 1) is not
+> like-for-like.
+
+> **`/updates` at very high worker counts is not yet characterized.** On a many-core host (e.g.
+> 48 server-workers / 96 threads) Bootgly's `/updates` can collapse to a few hundred req/s:
+> concurrent batched `UPDATE`s deadlock in PostgreSQL (~1 s `deadlock_timeout` stalls; confirmed
+> in the PG log). Bootgly **wins `/updates` at ≤~24–32 workers**. This collapse persists even at
+> `DB_POOL_MAX=1`, so it is **not** purely a pool-size effect — the high-concurrency behaviour
+> (and why a blocking-PDO opponent avoids it) needs validation on real high-core hardware before
+> `/updates` is published as a settled result.
+
 #### Tuning notes
 
 From WSL2 / Ryzen 9 3900X / PostgreSQL `max_connections=100`:

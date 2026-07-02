@@ -15,11 +15,12 @@
  * children, each its own Revolt event loop on :8082) — one async PostgreSQL pool
  * per worker (DB_POOL_MAX, default 1).
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the bootable's Composer dependencies (and ext-pgsql) are installed:
  *   docker run --rm bootgly/bootgly_benchmarks:amphp test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,amphp --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php amphp.php start
  *   php amphp.php stop
  */
@@ -33,13 +34,15 @@ $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('npro
 // @ Async PostgreSQL pool size per worker (default 1 for parity with the other opponents).
 $poolMax = getenv('DB_POOL_MAX') ?: '1';
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the bootable's Composer dependencies must be installed.
+//   Always true inside the self-contained bench image; on a bare host, run
+//   `composer install` in bootables/amphp (ext-pgsql also required) or use the image.
+if (is_file("{$bootablesDir}/vendor/autoload.php") === false) {
    fwrite(STDERR,
-      "The AMPHP opponent runs only inside the bootgly/bootgly_benchmarks:amphp image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:amphp test benchmark HTTP_Server_CLI "
-      . "--opponents=bootgly,amphp --loads=techempower:*\n"
+      "The AMPHP opponent requires its Composer dependencies (bootables/amphp/vendor missing).\n"
+      . "Run `composer install` in bootables/amphp (ext-pgsql also required) or use the "
+      . "self-contained image: docker run --rm bootgly/bootgly_benchmarks:amphp test benchmark "
+      . "HTTP_Server_CLI --opponents=bootgly,amphp --loads=techempower:*\n"
    );
    exit(1);
 }

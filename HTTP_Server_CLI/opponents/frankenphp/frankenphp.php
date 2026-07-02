@@ -14,11 +14,12 @@
  * routes worker, index-techempower.php, raw PDO over PostgreSQL); any other set
  * -> Caddyfile (generic route worker, index.php).
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the frankenphp binary is on the PATH:
  *   docker run --rm bootgly/bootgly_benchmarks:frankenphp test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,frankenphp --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php frankenphp.php start
  *   php frankenphp.php stop
  */
@@ -33,12 +34,14 @@ $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('npro
 $techempower = strtolower(getenv('BENCHMARK_LOAD_SET') ?: '') === 'techempower';
 $caddyfile = $techempower ? 'Caddyfile.techempower' : 'Caddyfile';
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the frankenphp binary must be on the PATH. Always true
+//   inside the self-contained bench image; on a bare host, install FrankenPHP
+//   natively or use the image.
+if (trim((string) exec('command -v frankenphp 2>/dev/null')) === '') {
    fwrite(STDERR,
-      "The FrankenPHP opponent runs only inside the bootgly/bootgly_benchmarks:frankenphp image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:frankenphp test benchmark HTTP_Server_CLI "
+      "The FrankenPHP opponent requires the frankenphp binary on the PATH.\n"
+      . "Install it natively (https://frankenphp.dev) or use the self-contained image: "
+      . "docker run --rm bootgly/bootgly_benchmarks:frankenphp test benchmark HTTP_Server_CLI "
       . "--opponents=bootgly,frankenphp --loads=techempower:*\n"
    );
    exit(1);

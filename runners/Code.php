@@ -60,7 +60,7 @@ return new class extends Runner
       $results = [];
 
       foreach ($this->opponents as $Opponent) {
-         // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
+         // ? Filter (slug-normalized, e.g. "Laravel Octane" matches "laravel-octane")
          if ($Configs->opponents !== null && !in_array(Configs::slug($Opponent->name), array_map(Configs::slug(...), $Configs->opponents))) {
             continue;
          }

@@ -14,11 +14,12 @@
  * single config/routes.php, so there is NO bootable swap on the load set — the
  * same server answers both. It honors SERVER_PORT, SERVER_WORKER_NUM and DB_*.
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the swoole extension + the bootable's Composer dependencies are installed:
  *   docker run --rm bootgly/bootgly_benchmarks:hyperf test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,hyperf --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php hyperf.php start
  *   php hyperf.php stop
  */
@@ -28,12 +29,15 @@ $bootablesDir = realpath(__DIR__ . '/../../bootables/hyperf');
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the swoole extension + the bootable's Composer dependencies
+//   must be available. Always true inside the self-contained bench image; on a bare
+//   host, install swoole and run `composer install` in bootables/hyperf, or use the image.
+if (extension_loaded('swoole') === false || is_file("{$bootablesDir}/vendor/autoload.php") === false) {
    fwrite(STDERR,
-      "The Hyperf opponent runs only inside the bootgly/bootgly_benchmarks:hyperf image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:hyperf test benchmark HTTP_Server_CLI "
+      "The Hyperf opponent requires the swoole PHP extension and its Composer dependencies "
+      . "(bootables/hyperf/vendor).\n"
+      . "Install them natively or use the self-contained image: "
+      . "docker run --rm bootgly/bootgly_benchmarks:hyperf test benchmark HTTP_Server_CLI "
       . "--opponents=bootgly,hyperf --loads=techempower:*\n"
    );
    exit(1);

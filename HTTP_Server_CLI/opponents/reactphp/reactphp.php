@@ -13,11 +13,12 @@
  * runs reactphp-techempower.php in the FOREGROUND (the runner backgrounds it
  * with `&`). It forks BOOTGLY_WORKERS children (each its own event loop on :8082).
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the bootable's Composer dependencies are installed:
  *   docker run --rm bootgly/bootgly_benchmarks:reactphp test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,reactphp --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php reactphp.php start
  *   php reactphp.php stop
  */
@@ -28,12 +29,14 @@ $bootable = 'reactphp-techempower.php';
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the bootable's Composer dependencies must be installed.
+//   Always true inside the self-contained bench image; on a bare host, run
+//   `composer install` in bootables/reactphp or use the image.
+if (is_file("{$bootablesDir}/vendor/autoload.php") === false) {
    fwrite(STDERR,
-      "The ReactPHP opponent runs only inside the bootgly/bootgly_benchmarks:reactphp image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:reactphp test benchmark HTTP_Server_CLI "
+      "The ReactPHP opponent requires its Composer dependencies (bootables/reactphp/vendor missing).\n"
+      . "Run `composer install` in bootables/reactphp or use the self-contained image: "
+      . "docker run --rm bootgly/bootgly_benchmarks:reactphp test benchmark HTTP_Server_CLI "
       . "--opponents=bootgly,reactphp --loads=techempower:*\n"
    );
    exit(1);

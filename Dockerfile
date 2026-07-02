@@ -8,9 +8,10 @@
 # Laravel Octane and PostgreSQL) live ONLY in this image — never in bootgly:slim / bootgly:full,
 # which stay dependency-free. Opt in per opponent with build ARGs.
 #
-# BOOTGLY_BENCH_INPROCESS=1 makes the opponent scripts launch their server
-# natively (no docker-in-docker), so the runner spawns every server locally and
-# the client + servers share loopback — fair, and zero setup for the user.
+# The opponent scripts launch their server natively (no docker-in-docker) —
+# each guards on its own runtime capability (extension / vendor / binary), all
+# baked in here — so the runner spawns every server locally and the client +
+# servers share loopback: fair, and zero setup for the user.
 #
 # PostgreSQL (server + client) is ALWAYS baked in: every benchmark load set hits
 # the database — `techempower` via /db /query /fortunes /updates /cached-queries,
@@ -22,7 +23,7 @@
 #     -t bootgly/bootgly_benchmarks:swoole .
 #
 #   docker run --rm bootgly/bootgly_benchmarks:swoole test benchmark HTTP_Server_CLI \
-#     --opponents=bootgly,swoole-base --runner=tcp_client --loads=techempower:1
+#     --opponents=bootgly,swoole --runner=tcp_client --loads=techempower:1
 # ============================================================================
 
 ARG BOOTGLY_FULL_IMAGE=bootgly:full
@@ -43,9 +44,6 @@ ARG WITH_LARAVEL_OCTANE=0
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 ENV BOOTABLES=/bootgly_benchmarks/HTTP_Server_CLI/bootables
-
-# ! Opponents run their server in-process (no docker-in-docker) inside this image.
-ENV BOOTGLY_BENCH_INPROCESS=1
 
 # ! PostgreSQL — ALWAYS installed: server + client + the `pdo_pgsql` PHP driver.
 #   Every benchmark load set hits the DB (techempower /db /query /fortunes /updates

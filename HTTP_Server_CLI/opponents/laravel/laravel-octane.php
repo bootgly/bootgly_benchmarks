@@ -16,11 +16,12 @@
  * Eloquent/PDO connection — matching the pooled servers' DB_POOL_MAX=1 per-worker
  * database footprint.
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the swoole extension + the Laravel vendor tree are installed:
  *   docker run --rm bootgly/bootgly_benchmarks:laravel-octane test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,laravel-octane --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php laravel-octane.php start
  *   php laravel-octane.php stop
  */
@@ -30,12 +31,15 @@ $bootablesDir = realpath(__DIR__ . '/../../bootables/laravel');
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the swoole extension + the Laravel vendor tree must be
+//   available. Always true inside the self-contained bench image; on a bare host,
+//   install swoole and run `composer install` in bootables/laravel, or use the image.
+if (extension_loaded('swoole') === false || is_file("{$bootablesDir}/vendor/autoload.php") === false) {
    fwrite(STDERR,
-      "The Laravel Octane opponent runs only inside the bootgly/bootgly_benchmarks:laravel-octane image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:laravel-octane test benchmark HTTP_Server_CLI "
+      "The Laravel Octane opponent requires the swoole PHP extension and its Composer "
+      . "dependencies (bootables/laravel/vendor).\n"
+      . "Install them natively or use the self-contained image: "
+      . "docker run --rm bootgly/bootgly_benchmarks:laravel-octane test benchmark HTTP_Server_CLI "
       . "--opponents=bootgly,laravel-octane --loads=techempower:*\n"
    );
    exit(1);

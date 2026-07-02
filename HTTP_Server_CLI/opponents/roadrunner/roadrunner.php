@@ -15,11 +15,12 @@
  * the 7 TFB routes); any other set -> worker.php (generic route set, the .rr.yaml
  * default).
  *
- * Image-only: run through the Docker image, never on a bare host —
+ * Zero-setup path — the self-contained Docker image; native host runs also work
+ * when the `rr` binary is present in bootables/roadrunner:
  *   docker run --rm bootgly/bootgly_benchmarks:roadrunner test benchmark \
  *     HTTP_Server_CLI --opponents=bootgly,roadrunner --loads=techempower:*
  *
- * Usage (inside the image, invoked by the runner):
+ * Usage (invoked by the runner):
  *   php roadrunner.php start
  *   php roadrunner.php stop
  */
@@ -33,12 +34,14 @@ $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('npro
 //   (raw PDO TFB routes), any other set runs the .rr.yaml default (worker.php).
 $techempower = strtolower(getenv('BENCHMARK_LOAD_SET') ?: '') === 'techempower';
 
-// ? Image-only: this opponent runs natively inside the self-contained bench image
-//   (ENV BOOTGLY_BENCH_INPROCESS=1). It is not runnable on a bare host.
-if (getenv('BOOTGLY_BENCH_INPROCESS') !== '1') {
+// ? Capability guard — the `rr` Go binary must be present in the bootable dir.
+//   Always true inside the self-contained bench image; on a bare host, download
+//   `rr` into bootables/roadrunner or use the image.
+if (is_executable("{$bootablesDir}/rr") === false) {
    fwrite(STDERR,
-      "The RoadRunner opponent runs only inside the bootgly/bootgly_benchmarks:roadrunner image.\n"
-      . "Run: docker run --rm bootgly/bootgly_benchmarks:roadrunner test benchmark HTTP_Server_CLI "
+      "The RoadRunner opponent requires the `rr` binary (bootables/roadrunner/rr missing).\n"
+      . "Download it there (https://roadrunner.dev) or use the self-contained image: "
+      . "docker run --rm bootgly/bootgly_benchmarks:roadrunner test benchmark HTTP_Server_CLI "
       . "--opponents=bootgly,roadrunner --loads=techempower:*\n"
    );
    exit(1);

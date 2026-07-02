@@ -47,6 +47,10 @@ return new class (
    // # server readiness
    public int $readyTimeout = 10;
 
+   // * Metadata
+   // # opponent start output (stdout+stderr) — surfaced when readiness fails
+   private string $serverLog = '';
+
 
    public function __construct (
       int $port = 8080,
@@ -217,7 +221,7 @@ return new class (
       $totalLoads = count($filteredLoads);
 
       foreach ($this->opponents as $Opponent) {
-         // ? Filter (slug-normalized, e.g. "Swoole (Base)" matches "swoole-base")
+         // ? Filter (slug-normalized, e.g. "Laravel Octane" matches "laravel-octane")
          if ($Configs->opponents !== null && !in_array(Configs::slug($Opponent->name), array_map(Configs::slug(...), $Configs->opponents))) {
             continue;
          }
@@ -271,7 +275,13 @@ return new class (
 
             // @ Wait for server readiness
             if ( !$this->waitForServer() ) {
-               echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n\n";
+               echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n";
+               // ? Surface the opponent's own start output (e.g. capability guard message).
+               $output = is_file($this->serverLog) ? trim((string) file_get_contents($this->serverLog)) : '';
+               foreach ($output === '' ? [] : array_slice(explode("\n", $output), -6) as $line) {
+                  echo "    {$DIM}{$line}{$RESET}\n";
+               }
+               echo "\n";
                $this->stopServer($Opponent);
                continue;
             }
@@ -358,7 +368,10 @@ return new class (
    {
       $script = $Opponent->script;
       putenv("BOOTGLY_WORKERS={$workers}");
-      exec("BOOTGLY_WORKERS={$workers} php {$script} start > /dev/null 2>&1 &");
+      // ! Capture start output — surfaced by the caller when readiness fails.
+      $this->serverLog = sys_get_temp_dir() . '/bootgly-benchmark-server.log';
+      @unlink($this->serverLog);
+      exec("BOOTGLY_WORKERS={$workers} php {$script} start > {$this->serverLog} 2>&1 &");
    }
    private function stopServer (Opponent $Opponent): void
    {

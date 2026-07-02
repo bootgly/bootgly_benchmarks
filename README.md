@@ -43,7 +43,7 @@ Benchmark Bootgly against **Swoole** on the `TechEmpower` load set:
 
 ```bash
 docker run --rm bootgly/bootgly_benchmarks:swoole \
-   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-base --loads=techempower:*
+   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --loads=techempower:*
 ```
 
 The only requirement is a running Docker daemon. Swap the image tag / opponent for any
@@ -51,7 +51,7 @@ published one:
 
 | `<image>` | `<opponent>` | Published |
 |-----------|--------------|:---------:|
-| `swoole` | `swoole-base` · `swoole-techempower` | ✅ |
+| `swoole` | `swoole` | ✅ |
 | `workerman` | `workerman` | ✅ |
 | `reactphp` | `reactphp` | ✅ |
 | `amphp` | `amphp` | ✅ |

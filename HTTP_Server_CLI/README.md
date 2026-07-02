@@ -19,7 +19,7 @@ Benchmark Bootgly against **Swoole** using the `TechEmpower` load set:
 
 ```bash
 docker run --rm bootgly/bootgly_benchmarks:swoole \
-   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-base --loads=techempower:*
+   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --loads=techempower:*
 ```
 
 The only requirement is a running Docker daemon.
@@ -35,7 +35,7 @@ docker run --rm bootgly/bootgly_benchmarks:<image> \
 
 | `<image>` | `<opponent>` | Published |
 |-----------|--------------|:---------:|
-| `swoole` | `swoole-base` · `swoole-techempower` | ✅ |
+| `swoole` | `swoole` | ✅ |
 | `workerman` | `workerman` | ✅ |
 | `reactphp` | `reactphp` | ✅ |
 | `amphp` | `amphp` | ✅ |
@@ -119,14 +119,14 @@ docker run --rm bootgly/bootgly_benchmarks:<image> \
 >
 > ```bash
 > docker run --rm bootgly/bootgly_benchmarks:swoole \
->    test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-base --loads=techempower:*
+>    test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --loads=techempower:*
 > ```
 
 Published images (Docker Hub, `bootgly/bootgly_benchmarks:<tag>`):
 
 | `<tag>` | Opponent name(s) (`--opponents=`) | Runtime baked in |
 |---------|-----------------------------------|------------------|
-| `swoole` | `swoole-base`, `swoole-techempower` | Swoole + `pdo_pgsql` |
+| `swoole` | `swoole` | Swoole + `pdo_pgsql` |
 | `workerman` | `workerman` | Workerman v5 (pure PHP) |
 | `reactphp` | `reactphp` | ReactPHP + `voryx/pgasync` |
 | `amphp` | `amphp` | Amp v3 + ext-pgsql |
@@ -186,9 +186,12 @@ All loads tagged `@opponents: all` — cross-framework fair comparison.
 
 Bootgly-internal stress surface, for self-comparison during framework
 development. Backed by
-`projects/Benchmark/HTTP_Server_CLI/router/bootgly-benchmark.SAPI.php`. Every
-load is tagged `@opponents: Bootgly`, so the runner skips cross-framework
-opponents automatically — even if you pass `--opponents=bootgly,swoole-base`.
+`projects/Benchmark/HTTP_Server_CLI/router/bootgly-benchmark.SAPI.php`. The
+route loads (static, dynamic, nested, middleware, mixed) are tagged
+`@opponents: all` — cross-framework opponents serve the same route set from
+their generic bootables. Only the DB probe loads are tagged
+`@opponents: Bootgly`, so the runner skips other opponents on them
+automatically — even if you pass `--opponents=bootgly,swoole`.
 
 | # | File | Group | Route(s) |
 |---|------|-------|----------|
@@ -201,17 +204,17 @@ opponents automatically — even if you pass `--opponents=bootgly,swoole-base`.
 | 7 | `1.3.1-catch_all` | Catch-all | non-existent paths → `404` |
 | 8 | `2.1.1-nested_6` | Nested | `/admin/*` + `/account/*` groups |
 | 9 | `3.1.1-middleware_3` | Middleware | `/protected/*` (real `RequestId` middleware) |
-| 10 | `z.1.1-mixed_8` | Mixed | 5 static + 3 dynamic |
-| 11 | `z.1.2-mixed_20` | Mixed | 10 static + 10 dynamic |
-| 12 | `z.1.3-full_mix` | Mixed | static + dynamic + nested + middleware + 404 |
-| 13 | `4.1.1-database_native_ping` | DB probe | `/database/native/ping` |
-| 14 | `4.1.2-database_runner_ping` | DB probe | `/database/resource/ping` |
-| 15 | `4.2.1-database_native_parameters` | DB probe | `/database/native/parameters` |
-| 16 | `4.2.2-database_runner_parameters` | DB probe | `/database/resource/parameters` |
-| 17 | `4.3.1-database_native_pool` | DB probe | `/database/native/pool` |
-| 18 | `4.3.2-database_runner_pool` | DB probe | `/database/resource/pool` |
-| 19 | `4.4.1-database_native_sleep` | DB probe | `/database/native/sleep` |
-| 20 | `4.4.2-database_runner_sleep` | DB probe | `/database/resource/sleep` |
+| 10 | `4.1.1-database_native_ping` | DB probe | `/database/native/ping` |
+| 11 | `4.1.2-database_runner_ping` | DB probe | `/database/resource/ping` |
+| 12 | `4.2.1-database_native_parameters` | DB probe | `/database/native/parameters` |
+| 13 | `4.2.2-database_runner_parameters` | DB probe | `/database/resource/parameters` |
+| 14 | `4.3.1-database_native_pool` | DB probe | `/database/native/pool` |
+| 15 | `4.3.2-database_runner_pool` | DB probe | `/database/resource/pool` |
+| 16 | `4.4.1-database_native_sleep` | DB probe | `/database/native/sleep` |
+| 17 | `4.4.2-database_runner_sleep` | DB probe | `/database/resource/sleep` |
+| 18 | `z.1.1-mixed_8` | Mixed | 5 static + 3 dynamic |
+| 19 | `z.1.2-mixed_20` | Mixed | 10 static + 10 dynamic |
+| 20 | `z.1.3-full_mix` | Mixed | static + dynamic + nested + middleware + 404 |
 
 ### `@opponents` tag
 
@@ -228,7 +231,7 @@ stays Bootgly-only.
 
 The cross-framework data comparison is the `techempower` set's four DB routes plus
 the cached-queries route (loads `3,4,5,6,7`). They are neutral across opponents and
-run against Bootgly and **Swoole TechEmpower**:
+run against Bootgly and **Swoole**:
 
 | Route | Purpose |
 |-------|---------|
@@ -266,7 +269,7 @@ DB_POOL_MAX=1 \
 ./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=techempower:3,4,5,6
 ```
 
-Compare Bootgly with the Swoole TechEmpower opponent:
+Compare Bootgly with the Swoole opponent:
 
 ```bash
 DB_HOST=127.0.0.1 \
@@ -277,10 +280,10 @@ DB_PASS= \
 DB_SSLMODE=disable \
 DB_SSLVERIFY=false \
 DB_POOL_MAX=1 \
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=techempower:3,4,5,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --runner=tcp_client --connections=1024 --duration=10 --server-workers=24 --client-workers=4 --loads=techempower:3,4,5,6
 ```
 
-The Swoole TechEmpower opponent requires PHP extensions `swoole` and `pdo_pgsql`
+On the `techempower` set, the Swoole opponent requires PHP extensions `swoole` and `pdo_pgsql`
 (`php8.4-pgsql` on this machine). It follows the TechEmpower Swoole PostgreSQL
 pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 
@@ -343,8 +346,7 @@ supports multi-worker forking and HTTP pipelining.
 | Server | Runtime | TFB routes | Docker image (`bootgly/bootgly_benchmarks:`) |
 |--------|---------|-----------|--------------|
 | **Bootgly** HTTP Server CLI | PHP (event-loop) | 7 | baked into every image (also native) |
-| **Swoole** (Base mode) | PHP (C extension), reactor per worker | 7 (TechEmpower bootable in `SWOOLE_BASE` mode) | `swoole` |
-| **Swoole** TechEmpower | PHP (C extension), `SWOOLE_BASE` + PDO pool | 7 | `swoole` |
+| **Swoole** | PHP (C extension), `SWOOLE_BASE` reactor per worker + PDO pool | 7 | `swoole` |
 | **Hyperf** | PHP (Swoole framework), full-stack coroutine | 7 (`/cached-queries` = per-worker in-memory `CachedWorld` cache) | `hyperf` |
 | **Workerman** v5 | PHP (event-loop), sync per-worker PDO | 7 | `workerman` |
 | **RoadRunner** | Go + PHP (goridge), PSR-7 worker, per-worker PDO | 7 | `roadrunner` |
@@ -357,15 +359,15 @@ Event-loop opponents use `nproc / 2` workers for fair CPU distribution. **Larave
 runs persistent Swoole workers (1:1 with server-workers), each holding one persistent PDO
 connection — matching the pooled servers' per-worker DB footprint.
 
-All published opponents — `swoole-base`, `swoole-techempower`, `hyperf`, `workerman`,
-`roadrunner`, `reactphp`, `amphp` — implement all **seven** TechEmpower routes (including
-`/cached-queries`). **Laravel Octane** serves **six** (`/cached-queries` is deliberately
-**N/A** — see below).
+All published opponents — `swoole`, `hyperf`, `workerman`, `roadrunner`, `reactphp`,
+`amphp` — implement all **seven** TechEmpower routes (including `/cached-queries`).
+**Laravel Octane** serves **six** (`/cached-queries` is deliberately **N/A** — see below).
 
-> **Swoole Process / Coroutine** modes are no longer standalone opponents — they live on as
-> bootables (`bootables/swoole/swoole-process-routes.php`, `…coroutine-routes.php`) for a
-> future single Swoole opponent with a mode argument. The `swoole` image ships the **Base**
-> and **TechEmpower** opponents only.
+> **Swoole Process / Coroutine** modes are not standalone opponents — they live on as
+> bootables (`bootables/swoole/swoole-process-routes.php`, `…coroutine-routes.php`) for
+> ad-hoc mode comparisons. The `swoole` image ships the **one** `swoole` opponent, always
+> in `SWOOLE_BASE` mode; its bootable is derived from the load set (techempower → the
+> TFB PDO bootable, anything else → the generic route set).
 
 > **Laravel** dropped its FPM/web-server stacks (`laravel-nginx`, `laravel-apache`,
 > `laravel-ols`): nginx/Apache need PHP-FPM (the base image is CLI-only) and OpenLiteSpeed
@@ -384,8 +386,7 @@ CLI filter values for `--opponents=`:
 | Name | Description (image = `bootgly/bootgly_benchmarks:<tag>`) |
 |------|-------------|
 | `bootgly` | Bootgly HTTP Server CLI — baseline, baked into every image (also runnable natively), all 7 TechEmpower routes |
-| `swoole-base` | Swoole `SWOOLE_BASE` mode (tag `swoole`) — swaps to the TechEmpower bootable, all 7 routes |
-| `swoole-techempower` | Swoole `SWOOLE_BASE` + PDO pool (tag `swoole`) — all 7 TechEmpower routes |
+| `swoole` | Swoole `SWOOLE_BASE` mode (tag `swoole`) — techempower set = TFB bootable with PDO pool (all 7 routes); benchmark set = generic route set |
 | `hyperf` | Hyperf, Swoole framework (tag `hyperf`) — all 7 routes (`/cached-queries` = per-worker in-memory cache) |
 | `workerman` | Workerman v5, sync per-worker PDO (tag `workerman`) — all 7 routes |
 | `roadrunner` | RoadRunner (Go + PHP), PSR-7 worker, per-worker PDO (tag `roadrunner`) — all 7 routes |
@@ -425,10 +426,10 @@ Absolute throughput is environment-dependent — run the suite on your own hardw
 
 #### 1. Create the opponent script
 
-Each opponent lives in its own folder under `opponents/` and may hold several
-variations (e.g. `opponents/swoole/` has `swoole-base.php`,
-`swoole-techempower.php`, …). Create `opponents/myserver/myserver.php` — it
-starts the HTTP server and blocks until killed:
+Each opponent lives in its own folder under `opponents/` with **one** script —
+one canonical opponent per server (e.g. `opponents/swoole/swoole.php` derives
+its bootable from the active load set). Create `opponents/myserver/myserver.php`
+— it starts the HTTP server and blocks until killed:
 
 ```php
 <?php
@@ -575,8 +576,8 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 [Database Benchmark](#database-benchmark)):
 
 ```bash
-# Bootgly vs Swoole TechEmpower, six TechEmpower routes
-./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-techempower --loads=techempower:*
+# Bootgly vs Swoole, six TechEmpower routes
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --loads=techempower:*
 ```
 
 ### Filtering loads
@@ -704,12 +705,12 @@ Multiple opponents — one block per load, each opponent compared to the Bootgly
 baseline:
 
 ```
-  Bootgly vs Swoole TechEmpower
+  Bootgly vs Swoole
 
   ── Plaintext ──
   Opponent          Metric              Latency         Transfer        vs Bootgly
   Bootgly             147,163 req/s       708.04us        18.53MB/s       baseline
-  Swoole TechEmpower  115,110 req/s       925.85us        18.33MB/s       -21.8%
+  Swoole              115,110 req/s       925.85us        18.33MB/s       -21.8%
 ```
 
 - **vs Bootgly** = `((Bootgly − Opponent) / Opponent) × 100` — a negative value means the opponent is slower than Bootgly.
@@ -803,7 +804,7 @@ export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
        DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
 for sw in 1 2 4 8 12 24; do
    php bootgly test benchmark HTTP_Server_CLI \
-      --opponents=bootgly,swoole-techempower --runner=tcp_client \
+      --opponents=bootgly,swoole --runner=tcp_client \
       --connections=512 --duration=10 --server-workers="$sw" --loads=techempower:1,2,3,4,5,6
 done
 ```

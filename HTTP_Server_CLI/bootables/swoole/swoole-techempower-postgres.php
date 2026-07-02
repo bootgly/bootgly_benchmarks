@@ -292,8 +292,8 @@ $port = getenv('SERVER_PORT') ?: '8082';
 $workers = getenv('SERVER_WORKER_NUM') ?: (string) max(1, (int) (shell_exec('nproc 2>/dev/null') ?: 1) / 2);
 
 // @ Reactor mode: SWOOLE_PROCESS by default (master + per-worker PDO pool). The
-//   Swoole (Base) opponent reuses this same TechEmpower route set in SWOOLE_BASE
-//   via SWOOLE_SERVER_MODE=base, for a base-mode /plaintext + /json comparison.
+//   Swoole opponent runs this TechEmpower route set in SWOOLE_BASE via
+//   SWOOLE_SERVER_MODE=base — every worker accepts its own connections.
 $mode = getenv('SWOOLE_SERVER_MODE') === 'base' ? SWOOLE_BASE : SWOOLE_PROCESS;
 
 $Server = new Server('0.0.0.0', is_numeric($port) ? (int) $port : 8082, $mode);

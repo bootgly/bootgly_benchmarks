@@ -36,7 +36,7 @@ newer, which include a `# Config:` header block:
 #   server-workers: 16
 
 [Bootgly][Database single query] rps=68,500 latency=6.80ms transfer=10.08MB/s
-[Swoole TechEmpower][Database single query] rps=59,556 latency=7.82ms transfer=10.84MB/s
+[Swoole][Database single query] rps=59,556 latency=7.82ms transfer=10.84MB/s
 ```
 
 Files without `# Config:` are rejected with a clear error.

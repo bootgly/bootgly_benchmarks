@@ -32,6 +32,46 @@ Benchmarks | Interface | Result
 
 ---
 
+## 🐳 Quickstart (0 setup with Docker)
+
+The flagship **HTTP Server CLI** cross-framework benchmark runs from **one command** — no
+install, no config, no database setup. It pulls a self-contained image (Bootgly + the
+opponent + PostgreSQL, which **boots and seeds itself**) and prints the full benchmark:
+Bootgly vs the opponent, static **and** database routes.
+
+Benchmark Bootgly against **Swoole** on the `TechEmpower` load set:
+
+```bash
+docker run --rm bootgly/bootgly_benchmarks:swoole \
+   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole-base --loads=techempower:*
+```
+
+The only requirement is a running Docker daemon. Swap the image tag / opponent for any
+published one:
+
+| `<image>` | `<opponent>` | Published |
+|-----------|--------------|:---------:|
+| `swoole` | `swoole-base` · `swoole-techempower` | ✅ |
+| `workerman` | `workerman` | ✅ |
+| `reactphp` | `reactphp` | ✅ |
+| `amphp` | `amphp` | ✅ |
+| `roadrunner` | `roadrunner` | ✅ |
+| `hyperf` | `hyperf` | ✅ |
+| `laravel-octane` | `laravel-octane` | ✅ |
+
+```bash
+docker run --rm bootgly/bootgly_benchmarks:<image> \
+   test benchmark HTTP_Server_CLI --opponents=bootgly,<opponent> --loads=techempower:*
+```
+
+> ✅ published to Docker Hub. `frankenphp` is **deferred** — the official FrankenPHP static
+> binary ships no `pdo_pgsql`, so its DB routes can't run in the self-contained image yet.
+> Tuning passes straight through (`--server-workers=15 --connections=512 --duration=10`);
+> override the bundled DB with `-e DB_HOST=… -e DB_PORT=…`. Full details:
+> [HTTP Server CLI Quickstart][BENCHMARK_03].
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Clone both repositories side by side

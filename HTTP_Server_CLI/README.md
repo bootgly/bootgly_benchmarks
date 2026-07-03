@@ -42,9 +42,10 @@ docker run --rm bootgly/bootgly_benchmarks:<image> \
 | `roadrunner` | `roadrunner` | ✅ |
 | `hyperf` | `hyperf` | ✅ |
 | `laravel-octane` | `laravel-octane` | ✅ |
+| `frankenphp` | `frankenphp` | ✅ |
 
-> ✅ published to Docker Hub. `frankenphp` is **deferred** — the official FrankenPHP static
-> binary ships no `pdo_pgsql`, so its DB routes can't run in the self-contained image yet.
+> ✅ published to Docker Hub. `frankenphp` bundles the official static binary, which already
+> embeds `pdo_pgsql`/`pgsql`, so its TechEmpower DB routes run in the self-contained image.
 
 ### Common tweaks
 
@@ -133,16 +134,16 @@ Published images (Docker Hub, `bootgly/bootgly_benchmarks:<tag>`):
 | `roadrunner` | `roadrunner` | RoadRunner (Go) + `pdo_pgsql` |
 | `hyperf` | `hyperf` | Hyperf (Swoole) + `pdo_pgsql` |
 | `laravel-octane` | `laravel-octane` | Laravel Octane on Swoole |
+| `frankenphp` | `frankenphp` | FrankenPHP static binary (embeds `pdo_pgsql`/`pgsql`) |
 
 `bootgly` is the baseline opponent and is baked into **every** image (pass it alongside the
 opponent: `--opponents=bootgly,<opponent>`). Worker count is read from `BOOTGLY_WORKERS`
 (default `nproc / 2`); override the bundled DB with `-e DB_HOST=… -e DB_PORT=… -e DB_NAME=…
 -e DB_USER=… -e DB_PASS=…`.
 
-> **FrankenPHP is deferred.** The official FrankenPHP static binary embeds its own ZTS PHP
-> with **no `pdo_pgsql`**, so the TechEmpower DB routes can't run in the self-contained
-> image yet. Its opponent script is in place; the image is not published until a
-> PG-capable binary is wired in.
+> **FrankenPHP runs the DB routes.** The official FrankenPHP static binary embeds its own ZTS
+> PHP with `pdo_pgsql`/`pgsql` already compiled in, so the TechEmpower DB routes run in the
+> self-contained image — the worker opens one persistent raw PDO to the bundled PostgreSQL.
 
 ### 2. Bootgly natively (optional)
 
@@ -353,7 +354,7 @@ supports multi-worker forking and HTTP pipelining.
 | **ReactPHP** | PHP (pure-async event loop), fork N + `SO_REUSEPORT`, async PG via `voryx/pgasync` | 7 | `reactphp` |
 | **AMPHP** | PHP (Amp v3 fibers, pure-async), fork N + `SO_REUSEPORT`, async PG via `amphp/postgres` | 7 | `amphp` |
 | **Laravel** (Octane) | Laravel Octane on Swoole, persistent workers | 6 (no `/cached-queries`) | `laravel-octane` |
-| **FrankenPHP** *(deferred)* | Go + PHP worker mode (Caddy-based), per-worker PDO | 7 | — (static binary lacks `pdo_pgsql`) |
+| **FrankenPHP** | Go + PHP worker mode (Caddy-based), per-worker persistent raw PDO | 7 | `frankenphp` |
 
 Event-loop opponents use `nproc / 2` workers for fair CPU distribution. **Laravel Octane**
 runs persistent Swoole workers (1:1 with server-workers), each holding one persistent PDO
@@ -393,7 +394,7 @@ CLI filter values for `--opponents=`:
 | `reactphp` | ReactPHP pure-async event loop, fork N + `SO_REUSEPORT`, async PG via `voryx/pgasync` (tag `reactphp`) — all 7 routes |
 | `amphp` | AMPHP (Amp v3 fibers) pure-async, fork N + `SO_REUSEPORT`, async PG via `amphp/postgres` (tag `amphp`) — all 7 routes |
 | `laravel-octane` | Laravel Octane on Swoole, persistent workers (tag `laravel-octane`) — 6 routes (no `/cached-queries`) |
-| `frankenphp` *(deferred)* | FrankenPHP worker mode — not published; the static binary lacks `pdo_pgsql` so the DB routes can't run in the self-contained image yet |
+| `frankenphp` | FrankenPHP worker mode (Caddy + embedded ZTS PHP), per-worker persistent raw PDO — the static binary embeds `pdo_pgsql`/`pgsql` (tag `frankenphp`) — all 7 routes |
 
 ### Laravel opponent (`laravel-octane`)
 

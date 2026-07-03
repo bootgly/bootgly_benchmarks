@@ -58,14 +58,15 @@ published one:
 | `roadrunner` | `roadrunner` | ✅ |
 | `hyperf` | `hyperf` | ✅ |
 | `laravel-octane` | `laravel-octane` | ✅ |
+| `frankenphp` | `frankenphp` | ✅ |
 
 ```bash
 docker run --rm bootgly/bootgly_benchmarks:<image> \
    test benchmark HTTP_Server_CLI --opponents=bootgly,<opponent> --loads=techempower:*
 ```
 
-> ✅ published to Docker Hub. `frankenphp` is **deferred** — the official FrankenPHP static
-> binary ships no `pdo_pgsql`, so its DB routes can't run in the self-contained image yet.
+> ✅ published to Docker Hub. `frankenphp` bundles the official static binary, which already
+> embeds `pdo_pgsql`/`pgsql`, so its TechEmpower DB routes run in the self-contained image.
 > Tuning passes straight through (`--server-workers=15 --connections=512 --duration=10`);
 > override the bundled DB with `-e DB_HOST=… -e DB_PORT=…`. Full details:
 > [HTTP Server CLI Quickstart][BENCHMARK_03].

@@ -749,37 +749,40 @@ shown; click the opponent for the full report (environment block, reproduction
 command, per-load tables, ratio chart, peaks). Results live under
 `results/<opponent>/`.
 
-**Swoole (TechEmpower)** — [report](results/swoole/RESULTS-techempower-2026-06-22_172346.md)
+> The Bootgly baseline was re-measured on **v0.19.1-beta** (persistent Fiber pool +
+> DBAL hot path, 2026-07-04); the opponent series are the previously published runs
+> (2026-06-22 … 2026-06-25) on the same machine, same runner and same
+> `DB_POOL_MAX=1` setup — opponent code did not change between those dates.
 
-![Bootgly vs Swoole — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/swoole/RESULTS-techempower-2026-06-22_172346.chart.throughput.png)
+**Swoole (TechEmpower)** — [report](results/swoole/RESULTS-techempower-2026-07-04_002103.md)
 
-![Bootgly vs Swoole — TechEmpower latency](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/swoole/RESULTS-techempower-2026-06-22_172346.chart.latency.png)
+![Bootgly vs Swoole — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/swoole/RESULTS-techempower-2026-07-04_002103.chart.throughput.png)
 
-**Hyperf** — [report](results/hyperf/RESULTS-techempower-2026-06-24_103419.md)
+**Hyperf** — [report](results/hyperf/RESULTS-techempower-2026-07-04_002106.md)
 
-![Bootgly vs Hyperf — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-06-24_103419.chart.throughput.png)
+![Bootgly vs Hyperf — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-07-04_002106.chart.throughput.png)
 
-![Bootgly vs Hyperf — TechEmpower latency](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-06-24_103419.chart.latency.png)
+![Bootgly vs Hyperf — TechEmpower latency](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/hyperf/RESULTS-techempower-2026-07-04_002106.chart.latency.png)
 
-**ReactPHP** — [report](results/reactphp/RESULTS-techempower-2026-06-25_161542.md)
+**ReactPHP** — [report](results/reactphp/RESULTS-techempower-2026-07-04_002108.md)
 
-![Bootgly vs ReactPHP — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/reactphp/RESULTS-techempower-2026-06-25_161542.chart.throughput.png)
+![Bootgly vs ReactPHP — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/reactphp/RESULTS-techempower-2026-07-04_002108.chart.throughput.png)
 
-**AMPHP** — [report](results/amphp/RESULTS-techempower-2026-06-25_161540.md)
+**AMPHP** — [report](results/amphp/RESULTS-techempower-2026-07-04_002111.md)
 
-![Bootgly vs AMPHP — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/amphp/RESULTS-techempower-2026-06-25_161540.chart.throughput.png)
+![Bootgly vs AMPHP — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/amphp/RESULTS-techempower-2026-07-04_002111.chart.throughput.png)
 
-**Laravel (nginx / Apache, PHP-FPM)** — [report](results/laravel-fpm/RESULTS-techempower-2026-06-22_233037.md)
+**Laravel (nginx / Apache, PHP-FPM)** — [report](results/laravel-fpm/RESULTS-techempower-2026-07-04_002115.md)
 
-![Bootgly vs Laravel FPM — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-fpm/RESULTS-techempower-2026-06-22_233037.chart.throughput.png)
+![Bootgly vs Laravel FPM — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-fpm/RESULTS-techempower-2026-07-04_002115.chart.throughput.png)
 
-**Laravel (Octane)** — [report](results/laravel-octane/RESULTS-techempower-2026-06-22_235421.md)
+**Laravel (Octane)** — [report](results/laravel-octane/RESULTS-techempower-2026-07-04_002118.md)
 
-![Bootgly vs Laravel Octane — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-octane/RESULTS-techempower-2026-06-22_235421.chart.throughput.png)
+![Bootgly vs Laravel Octane — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-octane/RESULTS-techempower-2026-07-04_002118.chart.throughput.png)
 
-**Laravel (OpenLiteSpeed + LSCache)** — [report](results/laravel-ols/RESULTS-techempower-2026-06-24_120235.md)
+**Laravel (OpenLiteSpeed + LSCache)** — [report](results/laravel-ols/RESULTS-techempower-2026-07-04_002121.md)
 
-![Bootgly vs Laravel OLS — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-ols/RESULTS-techempower-2026-06-24_120235.chart.throughput.png)
+![Bootgly vs Laravel OLS — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-ols/RESULTS-techempower-2026-07-04_002121.chart.throughput.png)
 
 #### 1. One-time setup
 

@@ -53,7 +53,8 @@ if ($loadSet === 'techempower' || $loadSet === 'benchmark') {
       $seeded = 0;
       exec($command, $seedOutput, $seeded);
 
-      if ($seeded !== 0) {
+      // ? Machine mode (--format=json) keeps the whole output free of diagnostics
+      if ($seeded !== 0 && getenv('BENCHMARK_FORMAT') !== 'json') {
          fwrite(STDERR, "Warning: could not seed TechEmpower database tables. Benchmark preflight may fail.\n");
       }
    }

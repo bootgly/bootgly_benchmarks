@@ -537,7 +537,7 @@ Three global options control what a run prints and generates:
 | Option | Values | Effect |
 |--------|--------|--------|
 | `--output` | `full` \| `compact` (default: auto) | Output style. `compact` prints the banner/system/opponents blocks once and a short header per round — the automatic choice when sweeping. |
-| `--format` | `text` \| `json` (default: `text`) | Results serialization. `json` emits a single machine-readable JSON document as the **last stdout line** (all rounds, per-round `.marks` paths, artifact paths). |
+| `--format` | `text` \| `json` (default: `text`) | Results serialization. `json` prints **only** a single machine-readable JSON document (all rounds, per-round `.marks` paths, artifact paths) — all human-readable output is suppressed, so the output pipes straight into `jq`. |
 | `--results` | `marks` \| `report` \| `charts` (default: `marks`) | Generated artifacts (inclusive levels). `report` also writes a `RESULTS-<set>-<ts>.md`; `charts` adds native SVG charts (throughput / ratio / latency) — no Python required. |
 
 Reports and charts are written to
@@ -609,7 +609,7 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 ./bootgly test benchmark HTTP_Server_CLI --loads=benchmark:3,6
 ```
 
-### Runner options (TCP_Client)
+### Runner options - TCP_Client
 
 ```bash
 # Custom connections and duration
@@ -630,11 +630,11 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 
 | Option | Description |
 |--------|-------------|
-| `--opponents=NAME,...` | Filter opponents by name |
+| `--opponents=NAME,...` | **Required.** Comma-separated opponent names |
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`<set>:*` for all, `<set>:1,2` to filter) |
 | `--server-workers=N\|A..B\|A..B:S\|N,N` | Server workers — sweep values run one round each (see [Sweeps](#sweeps)) |
 | `--output=full\|compact` | Output style (default: auto — compact when sweeping) |
-| `--format=text\|json` | Results serialization (json = machine-readable last stdout line) |
+| `--format=text\|json` | Results serialization (json = prints only the JSON document) |
 | `--results=marks\|report\|charts` | Generated artifacts (see [Output, format and results](#output-format-and-results)) |
 
 ---

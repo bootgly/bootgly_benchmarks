@@ -138,8 +138,8 @@ execution **round** in the same process, producing one `.bench.marks` per round.
 ```
 
 Three global options control the output: `--output=full|compact` (style; auto —
-compact when sweeping), `--format=text|json` (json = machine-readable document
-as the last stdout line) and `--results=marks|report|charts` (artifact levels —
+compact when sweeping), `--format=text|json` (json = prints only the
+machine-readable JSON document, human output suppressed) and `--results=marks|report|charts` (artifact levels —
 report adds a `RESULTS-*.md`, charts adds native SVGs). Reports/charts land in
 `bootgly/storage/tests/benchmarks/WS_Server_CLI/results/`; the run always ends with an
 **Artifacts** footer pointing at every generated file.
@@ -184,7 +184,7 @@ there is no silent default.
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`echo:*` for all, `echo:1` to filter) |
 | `--server-workers=N|A..B|A..B:S|N,N` | Server workers — sweep values run one round each (see [Configuration](#-configuration)) |
 | `--output=full|compact` | Output style (default: auto — compact when sweeping) |
-| `--format=text|json` | Results serialization (json = last stdout line) |
+| `--format=text|json` | Results serialization (json = prints only the JSON document) |
 | `--results=marks|report|charts` | Generated artifacts (report/charts land in `storage/tests/benchmarks/<case>/results/`) |
 
 ---

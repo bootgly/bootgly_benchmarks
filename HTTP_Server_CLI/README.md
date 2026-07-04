@@ -494,39 +494,57 @@ server SAPI from `<set>` automatically — no env needed.
 PostgreSQL loads also read `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`,
 `DB_SSLMODE`, and `DB_POOL_MAX` (see [Database Benchmark](#database-benchmark)).
 
-### Multi-dimensional Vary (`--vary`)
+### Sweeps
 
-The `--vary` option runs the benchmark across a **cartesian product** of parameter
-values, producing one round per combination.
+Options declared with `vary: true` in the case `options.php` schema — here,
+`--server-workers` — accept **sweep values**. Each expanded value becomes one
+execution **round** in the same process, so a full `server-workers` sweep runs
+from a single command (including inside a single `docker run`), producing one
+`.bench.marks` file per round.
 
-#### Syntax
+#### Sweep grammar
 
-```bash
---vary=key1:value1,key2:value2,...
-```
-
-#### Available dimensions
-
-| Key | Description |
-|-----|-------------|
-| `server-workers` | Number of server worker processes |
-| `connections` | Number of TCP connections |
-| `client-workers` | Number of client worker processes |
+| Value | Expands to |
+|-------|-----------|
+| `8` | `[8]` (single round — same as before) |
+| `1..24` | `[1, 2, …, 24]` |
+| `1..24:4` | `[1, 5, 9, 13, 17, 21]` (range with step) |
+| `1,2,4,8` | `[1, 2, 4, 8]` (explicit list) |
 
 #### Examples
 
 ```bash
-# 2D: vary server workers and connections
+# Full server-workers sweep, 24 rounds, one .marks per round:
 ./bootgly test benchmark HTTP_Server_CLI \
-   --vary=server-workers:4,connections:256
+   --opponents=bootgly,swoole --loads=techempower:1,2 --server-workers=1..24
 
-# 3D: full cartesian product
+# Coarse sweep with native charts (see --results below):
 ./bootgly test benchmark HTTP_Server_CLI \
-   --vary=server-workers:4,connections:256,client-workers:8
+   --opponents=bootgly,swoole --loads=techempower:1,2 \
+   --server-workers=1..24:4 --results=charts
 ```
 
-Round headers show only the dimensions that actually vary (e.g. `4sw/256c` instead
-of `4sw/256c/0cw`).
+> A sweep multiplies wall-clock time: rounds × opponents × loads × (`--duration`
+> + warmup/readiness overhead). Use `--duration=3` for exploratory sweeps.
+> Long sweeps can also accumulate client-side `TIME_WAIT` sockets; the runner's
+> port cleanup and preflight retries absorb this, but very dense sweeps benefit
+> from a pause between runs.
+
+### Output, format and results
+
+Three global options control what a run prints and generates:
+
+| Option | Values | Effect |
+|--------|--------|--------|
+| `--output` | `full` \| `compact` (default: auto) | Output style. `compact` prints the banner/system/opponents blocks once and a short header per round — the automatic choice when sweeping. |
+| `--format` | `text` \| `json` (default: `text`) | Results serialization. `json` emits a single machine-readable JSON document as the **last stdout line** (all rounds, per-round `.marks` paths, artifact paths). |
+| `--results` | `marks` \| `report` \| `charts` (default: `marks`) | Generated artifacts (inclusive levels). `report` also writes a `RESULTS-<set>-<ts>.md`; `charts` adds native SVG charts (throughput / ratio / latency) — no Python required. |
+
+Reports and charts are written to
+`bootgly/storage/tests/benchmarks/<case>/results/`. In both output styles the
+run ends with an **Artifacts** footer pointing at every `.bench.marks` file and
+generated report/chart; in `--format=json` the same paths are embedded in the
+JSON document (`rounds[].marks` + `artifacts`).
 
 ### Contextual Help
 
@@ -614,7 +632,10 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 |--------|-------------|
 | `--opponents=NAME,...` | Filter opponents by name |
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`<set>:*` for all, `<set>:1,2` to filter) |
-| `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
+| `--server-workers=N\|A..B\|A..B:S\|N,N` | Server workers — sweep values run one round each (see [Sweeps](#sweeps)) |
+| `--output=full\|compact` | Output style (default: auto — compact when sweeping) |
+| `--format=text\|json` | Results serialization (json = machine-readable last stdout line) |
+| `--results=marks\|report\|charts` | Generated artifacts (see [Output, format and results](#output-format-and-results)) |
 
 ---
 
@@ -784,56 +805,50 @@ command, per-load tables, ratio chart, peaks). Results live under
 
 ![Bootgly vs Laravel OLS — TechEmpower throughput](https://github.com/bootgly/bootgly_benchmarks/raw/main/HTTP_Server_CLI/results/laravel-ols/RESULTS-techempower-2026-07-04_002121.chart.throughput.png)
 
-#### 1. One-time setup
+#### 1. Run a sweep — one command
+
+Sweep values on `--server-workers` run every round in one process and — with
+[`--results=charts`](#output-format-and-results) — generate the Markdown report
+and native SVG charts in the same run, no Python required:
+
+```bash
+cd bootgly
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
+       DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=1
+php bootgly test benchmark HTTP_Server_CLI \
+   --opponents=bootgly,swoole --runner=tcp_client \
+   --connections=514 --duration=10 \
+   --server-workers=1..24 --loads=techempower:1,2,3,4,5,6 \
+   --results=charts
+```
+
+Everything lands in `bootgly/storage/tests/benchmarks/HTTP_Server_CLI/` — one
+`.bench.marks` per round plus `results/RESULTS-<set>-<ts>.md` and the
+throughput/ratio/latency SVGs.
+
+The same sweep runs **fully inside Docker** — mount a host directory to keep
+the artifacts:
+
+```bash
+docker run --rm -v "$(pwd)/results:/bootgly/storage/tests/benchmarks" \
+   bootgly/bootgly_benchmarks:swoole \
+   test benchmark HTTP_Server_CLI --opponents=bootgly,swoole \
+   --loads=techempower:1,2 --server-workers=1..24:4 --results=charts
+```
+
+#### 2. Legacy PNG tooling (`chart.py`)
+
+The Python `chart.py` renders the same reports as PNGs (the format used by the
+published reports above). It consumes the exact same `.bench.marks` files, so
+it keeps working on sweep output — one-time setup:
 
 ```bash
 cd bootgly_benchmarks/scripts
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt   # Python >= 3.10 + matplotlib
 ```
 
-Requires Python ≥ 3.10 and matplotlib. The venv only has to be built once.
-
-#### 2. Run a sweep
-
-The X axis is the config key that varies between input files (normally
-`server-workers`), so charts need a **sweep** — at least two runs differing in one
-parameter. Run from the **bootgly** directory.
-
-TechEmpower set, Bootgly vs Swoole, all six routes:
-
-```bash
-cd bootgly
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
-       DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
-for sw in 1 2 4 8 12 24; do
-   php bootgly test benchmark HTTP_Server_CLI \
-      --opponents=bootgly,swoole --runner=tcp_client \
-      --connections=512 --duration=10 --server-workers="$sw" --loads=techempower:1,2,3,4,5,6
-done
-```
-
-Bootgly-internal set (no opponents), e.g. just the DB probes:
-
-```bash
-cd bootgly
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bootgly DB_USER=postgres \
-       DB_PASS='' DB_SSLMODE=disable DB_POOL_MAX=3
-for sw in 1 2 4 8 12 24; do
-   php bootgly test benchmark HTTP_Server_CLI \
-      --opponents=bootgly --runner=tcp_client \
-      --connections=512 --duration=10 --server-workers="$sw" --loads=benchmark:13,14,15,16,17,18,19,20
-done
-```
-
-> A single-parameter sweep can also be produced in one command with
-> [`--vary`](#-configuration), e.g. `--vary=server-workers:1,server-workers:2,...`.
-> The `for` loop above is the explicit equivalent.
-
-#### 3. Generate the charts
-
-Point `--marks` at a glob covering **every** `.marks` file from the sweep, and
-`--out` at this case's `results/` directory:
+Then point `--marks` at a glob covering **every** `.marks` file from the sweep:
 
 ```bash
 cd bootgly_benchmarks/scripts

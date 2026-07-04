@@ -130,7 +130,8 @@ Available cases:
 
 The benchmark framework lives in `bootgly/Bootgly/ACI/Tests/Benchmark/` and provides:
 
-- **Configs** — parsed CLI options (`--opponents`, `--runner`, `--loads`, `--vary`)
+- **Configs** — parsed CLI options (`--opponents`, `--runner`, `--loads`, `--output`, `--format`, `--results`)
+- **Options** — per-case `options.php` schema (declares case options such as `--server-workers`, incl. sweep values: `1..24`, `1..24:4`, `1,2,4`)
 - **Opponents** — a named entry (with version and script path) to benchmark against
 - **Runner** — abstract executor that drives each benchmark. Built-in runners:
   | Runner | CLI Name | Use Case |

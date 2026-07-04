@@ -6,5 +6,10 @@
  */
 
 return [
-   '--server-workers=N' => 'Number of server workers (default: auto)',
+   'server-workers' => [
+      'type' => 'int',
+      'default' => null,   // auto
+      'vary' => true,
+      'description' => 'Number of server workers (default: auto)',
+   ],
 ];

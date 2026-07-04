@@ -67,12 +67,6 @@ return new class (
       if (isset($options['client-workers'])) {
          $this->workers = (int) $options['client-workers'];
       }
-      if (isset($options['server-workers'])) {
-         $serverWorkers = (int) $options['server-workers'];
-         foreach ($this->opponents as $Opponent) {
-            $Opponent->workers = $serverWorkers;
-         }
-      }
 
       // ! Materialise the auto client-worker count so $this->meta captures the
       //   resolved value (nproc / 2) instead of the `0` auto sentinel.
@@ -84,8 +78,6 @@ return new class (
       $this->meta['connections']    = $this->connections;
       $this->meta['duration']       = $this->duration;
       $this->meta['client-workers'] = $this->workers;
-      $this->meta['server-workers'] = $this->opponents[0]->workers
-         ?? max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
    }
    public function options (): array
    {
@@ -112,37 +104,10 @@ return new class (
       $sections = [];
 
       $defaultWorkers = max(1, (int) ((int)(exec('nproc 2>/dev/null') ?: 1) / 2));
-      $baseWorkers = $this->opponents[0]->workers ?? $defaultWorkers;
-      $workersStep = $Configs->vary['server-workers'] ?? 0;
-      $connectionsStep = $Configs->vary['connections'] ?? 0;
-      $clientWorkersStep = $Configs->vary['client-workers'] ?? 0;
+      $workersDisplay = (string) ($this->opponents[0]->workers ?? $defaultWorkers);
+      $clientWorkersDisplay = (string) $this->resolveClientWorkers();
 
-      if ($workersStep > 0) {
-         $lo = max(1, $baseWorkers - $workersStep);
-         $hi = $baseWorkers + $workersStep;
-         $workersDisplay = "{$lo}-{$hi}";
-      } else {
-         $workersDisplay = (string) $baseWorkers;
-      }
-
-      if ($connectionsStep > 0) {
-         $lo = max(1, $this->connections - $connectionsStep);
-         $hi = $this->connections + $connectionsStep;
-         $connectionsDisplay = "{$lo}-{$hi}";
-      } else {
-         $connectionsDisplay = (string) $this->connections;
-      }
-
-      $baseClientWorkers = $this->resolveClientWorkers();
-      if ($clientWorkersStep > 0) {
-         $lo = max(1, $baseClientWorkers - $clientWorkersStep);
-         $hi = $baseClientWorkers + $clientWorkersStep;
-         $clientWorkersDisplay = "{$lo}-{$hi}";
-      } else {
-         $clientWorkersDisplay = (string) $baseClientWorkers;
-      }
-
-      $clientFlags = "-c{$connectionsDisplay} -d{$this->duration}s -w{$clientWorkersDisplay}";
+      $clientFlags = "-c{$this->connections} -d{$this->duration}s -w{$clientWorkersDisplay}";
 
       $sections['Configuration'] = [
          'Client'  => "Bootgly WS_Client_CLI {$clientFlags}",
@@ -168,45 +133,6 @@ return new class (
       return max($cpuWorkers, $fdWorkers);
    }
 
-   /**
-    * @param array<string,int> $vary
-    * @return array<array{workers: int, connections: int, client-workers: int}>
-    */
-   private function computeRounds (array $vary): array
-   {
-      $nproc = (int) (exec('nproc 2>/dev/null') ?: 1);
-      $baseWorkers = $this->opponents[0]->workers ?? max(1, (int) ($nproc / 2));
-      $baseConnections = $this->connections;
-      $baseClientWorkers = $this->resolveClientWorkers();
-
-      $workersStep = $vary['server-workers'] ?? 0;
-      $connectionsStep = $vary['connections'] ?? 0;
-      $clientWorkersStep = $vary['client-workers'] ?? 0;
-
-      $workersValues = $workersStep > 0
-         ? array_keys(array_flip([max(1, $baseWorkers - $workersStep), $baseWorkers, $baseWorkers + $workersStep]))
-         : [$baseWorkers];
-
-      $connectionsValues = $connectionsStep > 0
-         ? array_keys(array_flip([max(1, $baseConnections - $connectionsStep), $baseConnections, $baseConnections + $connectionsStep]))
-         : [$baseConnections];
-
-      $clientWorkersValues = $clientWorkersStep > 0
-         ? array_keys(array_flip([max(1, $baseClientWorkers - $clientWorkersStep), $baseClientWorkers, $baseClientWorkers + $clientWorkersStep]))
-         : [$baseClientWorkers];
-
-      $rounds = [];
-      foreach ($workersValues as $w) {
-         foreach ($connectionsValues as $c) {
-            foreach ($clientWorkersValues as $cw) {
-               $rounds[] = ['workers' => $w, 'connections' => $c, 'client-workers' => $cw];
-            }
-         }
-      }
-
-      return $rounds;
-   }
-
    public function run (Configs $Configs): array
    {
       $BLUE   = self::wrap(self::_BLUE_FOREGROUND);
@@ -217,7 +143,6 @@ return new class (
       $RESET  = self::_RESET_FORMAT;
 
       $results = [];
-      $rounds = $this->computeRounds($Configs->vary);
 
       // @ Install SIGINT handler to stop server on CTRL+C
       $activeOpponent = null;
@@ -245,116 +170,80 @@ return new class (
             continue;
          }
 
-         $bestResults = [];
-         $roundCount = count($rounds);
+         // ! Server worker count — set by Runner::apply (or auto: nproc / 2)
+         $workers = $Opponent->workers
+            ?? max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-         if ($roundCount > 1) {
-            $varyKeys = [];
-            if (($Configs->vary['server-workers'] ?? 0) > 0) $varyKeys[] = ['key' => 'workers',        'suffix' => 'sw'];
-            if (($Configs->vary['connections'] ?? 0) > 0)    $varyKeys[] = ['key' => 'connections',    'suffix' => 'c'];
-            if (($Configs->vary['client-workers'] ?? 0) > 0) $varyKeys[] = ['key' => 'client-workers', 'suffix' => 'cw'];
+         // @ Kill port
+         $this->killPort();
 
-            $details = implode(', ', array_map(
-               fn ($r) => implode('/', array_map(
-                  fn ($k) => "{$r[$k['key']]}{$k['suffix']}",
-                  $varyKeys
-               )),
-               $rounds
-            ));
-            echo "  {$BOLD}{$BLUE}▸ {$Opponent->name}: {$roundCount} rounds ({$details}){$RESET}\n\n";
+         // @ Start server
+         $activeOpponent = $Opponent;
+         echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
+         $this->startServer($Opponent, $workers);
+
+         // @ Wait for server readiness
+         if ( !$this->waitForServer() ) {
+            echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n\n";
+            $this->stopServer($Opponent);
+            continue;
          }
 
-         foreach ($rounds as $roundIndex => $round) {
-            $roundConnections = $round['connections'];
-            $roundWorkers = $round['workers'];
-            $roundClientWorkers = $round['client-workers'];
+         echo "    {$GREEN}{$Opponent->name} ready (port {$this->port}).{$RESET}\n";
 
-            if ($roundCount > 1) {
-               $ri = $roundIndex + 1;
-               $parts = [];
-               if (($Configs->vary['server-workers'] ?? 0) > 0) $parts[] = "{$roundWorkers} server workers";
-               if (($Configs->vary['connections'] ?? 0) > 0)    $parts[] = "{$roundConnections} connections";
-               if (($Configs->vary['client-workers'] ?? 0) > 0) $parts[] = "{$roundClientWorkers} client workers";
-               $desc = implode(', ', $parts);
-               echo "  {$BOLD}{$BLUE}▸ Round {$ri}/{$roundCount} ({$desc}){$RESET}\n";
-            }
+         // @ Warmup
+         echo "    {$DIM}Warming up ({$this->warmupDuration}s)...{$RESET}\n";
+         $this->warmup();
+         sleep(2);
 
-            // @ Kill port
-            $this->killPort();
+         // @ Run loads
+         $loadResults = [];
+         $loadNum = 0;
+         $prevGroup = '';
 
-            // @ Start server
-            $activeOpponent = $Opponent;
-            echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
-            $this->startServer($Opponent, $roundWorkers);
-
-            // @ Wait for server readiness
-            if ( !$this->waitForServer() ) {
-               echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n\n";
-               $this->stopServer($Opponent);
+         foreach ($this->loads as $index => $Load) {
+            if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
                continue;
             }
 
-            echo "    {$GREEN}{$Opponent->name} ready (port {$this->port}).{$RESET}\n";
-
-            // @ Warmup
-            echo "    {$DIM}Warming up ({$this->warmupDuration}s)...{$RESET}\n";
-            $this->warmup();
-            sleep(2);
-
-            // @ Run loads
-            $loadNum = 0;
-            $prevGroup = '';
-
-            foreach ($this->loads as $index => $Load) {
-               if ($Configs->loads !== null && !in_array($index + 1, $Configs->loads)) {
-                  continue;
-               }
-
-               if (
-                  $Load->opponents !== 'all'
-                  && !in_array($Opponent->name, explode(',', $Load->opponents))
-               ) {
-                  continue;
-               }
-
-               if ($Load->group !== '' && $Load->group !== $prevGroup) {
-                  echo "    {$BOLD}{$Load->group}{$RESET}\n";
-                  $prevGroup = $Load->group;
-               }
-
-               $loadNum++;
-
-               $Result = $this->command($Load, $roundConnections, $roundClientWorkers);
-
-               $rps = $Result->rps !== null
-                  ? "{$BOLD}{$GREEN}" . number_format((int) $Result->rps) . " {$this->metric}{$RESET}"
-                  : "{$RED}N/A{$RESET}";
-               $transfer = $Result->transfer !== null
-                  ? "  {$DIM}({$Result->transfer}){$RESET}"
-                  : '';
-               $latency = $Result->latency !== null
-                  ? "  {$DIM}({$Result->latency}){$RESET}"
-                  : '';
-
-               echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}\n";
-
-               $label = $Load->label;
-               if (
-                  !isset($bestResults[$label])
-                  || $Result->rps !== null && ($bestResults[$label]->rps === null || $Result->rps > $bestResults[$label]->rps)
-               ) {
-                  $bestResults[$label] = $Result;
-               }
+            if (
+               $Load->opponents !== 'all'
+               && !in_array($Opponent->name, explode(',', $Load->opponents))
+            ) {
+               continue;
             }
 
-            echo "\n";
+            if ($Load->group !== '' && $Load->group !== $prevGroup) {
+               echo "    {$BOLD}{$Load->group}{$RESET}\n";
+               $prevGroup = $Load->group;
+            }
 
-            // @ Stop server
-            $this->stopServer($Opponent);
-            $activeOpponent = null;
+            $loadNum++;
+
+            $Result = $this->command($Load, $this->connections, $this->workers);
+
+            $rps = $Result->rps !== null
+               ? "{$BOLD}{$GREEN}" . number_format((int) $Result->rps) . " {$this->metric}{$RESET}"
+               : "{$RED}N/A{$RESET}";
+            $transfer = $Result->transfer !== null
+               ? "  {$DIM}({$Result->transfer}){$RESET}"
+               : '';
+            $latency = $Result->latency !== null
+               ? "  {$DIM}({$Result->latency}){$RESET}"
+               : '';
+
+            echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}\n";
+
+            $loadResults[$Load->label] = $Result;
          }
 
-         $results[$Opponent->name] = $bestResults;
+         echo "\n";
+
+         // @ Stop server
+         $this->stopServer($Opponent);
+         $activeOpponent = null;
+
+         $results[$Opponent->name] = $loadResults;
       }
 
       return $results;

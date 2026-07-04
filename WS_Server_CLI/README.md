@@ -125,26 +125,24 @@ the case's main `@.php`).
 
 ## ⚙️ Configuration
 
-### Multi-dimensional Vary (`--vary`)
+### Sweeps
 
-The `--vary` option runs the benchmark across a **cartesian product** of parameter
-values, producing one round per combination — feed a range of `.bench.marks`
-files to `chart.py` for a throughput-vs-axis chart.
-
-```bash
---vary=key1:value1,key2:value2,...
-```
-
-| Key | Description |
-|-----|-------------|
-| `server-workers` | Number of server worker processes |
-| `connections` | Number of connections |
-| `client-workers` | Number of client worker processes |
+Options declared with `vary: true` in the case `options.php` schema — here,
+`--server-workers` — accept **sweep values**: `8` (single), `1..24` (range),
+`1..24:4` (range with step) or `1,2,4,8` (list). Each expanded value becomes one
+execution **round** in the same process, producing one `.bench.marks` per round.
 
 ```bash
-# Vary server workers and connections (cartesian product)
-./bootgly test benchmark WS_Server_CLI --loads=echo:* --vary=server-workers:4,connections:256
+# server-workers sweep in one command (native SVG charts included):
+./bootgly test benchmark WS_Server_CLI --loads=echo:* --server-workers=1..24:4 --results=charts
 ```
+
+Three global options control the output: `--output=full|compact` (style; auto —
+compact when sweeping), `--format=text|json` (json = machine-readable document
+as the last stdout line) and `--results=marks|report|charts` (artifact levels —
+report adds a `RESULTS-*.md`, charts adds native SVGs). Reports/charts land in
+`bootgly/storage/tests/benchmarks/WS_Server_CLI/results/`; the run always ends with an
+**Artifacts** footer pointing at every generated file.
 
 ### Contextual Help
 
@@ -184,7 +182,10 @@ there is no silent default.
 |--------|-------------|
 | `--opponents=NAME,...` | Filter opponents by name |
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`echo:*` for all, `echo:1` to filter) |
-| `--vary=KEY:VALUE,...` | Multi-dimensional benchmarking (see [Configuration](#-configuration)) |
+| `--server-workers=N|A..B|A..B:S|N,N` | Server workers — sweep values run one round each (see [Configuration](#-configuration)) |
+| `--output=full|compact` | Output style (default: auto — compact when sweeping) |
+| `--format=text|json` | Results serialization (json = last stdout line) |
+| `--results=marks|report|charts` | Generated artifacts (report/charts land in `storage/tests/benchmarks/<case>/results/`) |
 
 ---
 

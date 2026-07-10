@@ -1,0 +1,80 @@
+name: Docker (build + push)
+
+# Builds every bootgly/bootgly_benchmarks:<opponent> image on the fresh
+# bootgly/bootgly:full base and pushes them to Docker Hub — one matrix job per
+# opponent (opt in via its WITH_<X> build ARG).
+#
+# The framework images (bootgly/bootgly:slim|full) stay dependency-free and are
+# built by the bootgly repo's own docker.yml on release. This workflow runs
+# AFTER that: it consumes the published bootgly/bootgly:full as its base, so it
+# must never run before the framework image for a given release is on Hub.
+#
+# Triggers:
+#   - repository_dispatch (framework-release): fired by bootgly/docker.yml right
+#     after it pushes bootgly/bootgly:full, so the base is guaranteed fresh.
+#   - workflow_dispatch: manual re-run (optionally against a specific base tag).
+#
+# Required repository secrets: DOCKER_USERNAME, DOCKER_PASSWORD (the bootgly
+# Docker Hub account).
+
+on:
+  repository_dispatch:
+    types: [framework-release]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Base framework image to build FROM.'
+        required: false
+        default: 'bootgly/bootgly:full'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { tag: swoole,         arg: WITH_SWOOLE }
+          - { tag: workerman,      arg: WITH_WORKERMAN }
+          - { tag: roadrunner,     arg: WITH_ROADRUNNER }
+          - { tag: frankenphp,     arg: WITH_FRANKENPHP }
+          - { tag: hyperf,         arg: WITH_HYPERF }
+          - { tag: reactphp,       arg: WITH_REACTPHP }
+          - { tag: amphp,          arg: WITH_AMPHP }
+          - { tag: laravel-octane, arg: WITH_LARAVEL_OCTANE }
+
+    steps:
+      - name: Checkout bootgly_benchmarks
+        uses: actions/checkout@v5
+
+      - name: Resolve base image
+        id: base
+        run: |
+          B="${{ github.event.client_payload.base || inputs.base || 'bootgly/bootgly:full' }}"
+          echo "value=$B" >> "$GITHUB_OUTPUT"
+          echo "Base image: $B"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push ${{ matrix.tag }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BOOTGLY_FULL_IMAGE=${{ steps.base.outputs.value }}
+            ${{ matrix.arg }}=1
+          tags: |
+            bootgly/bootgly_benchmarks:${{ matrix.tag }}

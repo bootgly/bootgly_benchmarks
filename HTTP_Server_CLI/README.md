@@ -449,11 +449,11 @@ joins the cross-framework `techempower` set:
 - `/plaintext`, `/json`, `/db`, `/query?queries=N`, `/fortunes`, `/updates?queries=N`, `/cached-queries?count=N`
 - See `bootables/swoole/swoole-techempower-postgres.php` for the reference implementation.
 
-#### 3. Self-register via `opponents/myserver/@.php`
+#### 3. Self-register via `opponents/myserver/autoboot.php`
 
-Each opponent folder ships an `@.php` that registers itself — the case's main
-`@.php` auto-discovers them with `glob(opponents/*/@.php)`, so you never edit it.
-A folder may register several variations (see `opponents/swoole/@.php`):
+Each opponent folder ships an `autoboot.php` that registers itself — the case's main
+`autoboot.php` auto-discovers them with `glob(opponents/*/autoboot.php)`, so you never edit it.
+A folder may register several variations (see `opponents/swoole/autoboot.php`):
 
 ```php
 <?php
@@ -566,7 +566,7 @@ Shows all discovered benchmark cases.
 
 Shows:
 
-- Case configuration (from `@.php`)
+- Case configuration (from `autoboot.php`)
 - Runner-specific options (from the selected runner's `options()` method)
 - Case-local options (from `options.php`, e.g. `--server-workers`)
 

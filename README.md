@@ -140,4 +140,4 @@ The benchmark framework lives in `bootgly/Bootgly/ACI/Tests/Benchmark/` and prov
   | TCP_Client | `tcp_client` | HTTP load testing via Bootgly's TCP client |
 - **Load** — a request distribution script (PHP for TCP_Client)
 
-Each benchmark case has a `@.php` entry-point that selects a runner, configures it, and registers opponents.
+Each benchmark case has a `autoboot.php` entry-point that selects a runner, configures it, and registers opponents.

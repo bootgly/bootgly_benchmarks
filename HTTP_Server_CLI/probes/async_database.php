@@ -149,7 +149,7 @@ function probe_bootstrap (string $Root): void
 
    if (defined('Bootgly\\CLI') === false) {
       if (defined('GET') === false) {
-         require $Root . '/Bootgly/WPI/autoload.php';
+         require $Root . '/Bootgly/WPI/autoboot.php';
       }
 
       $CLI = new \stdClass;
@@ -163,7 +163,7 @@ function probe_bootstrap (string $Root): void
    }
 
    if (defined('GET') === false) {
-      require $Root . '/Bootgly/WPI/autoload.php';
+      require $Root . '/Bootgly/WPI/autoboot.php';
    }
 }
 

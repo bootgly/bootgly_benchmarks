@@ -1,10 +1,10 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — Progress_Bar
+ * Bootgly Benchmarks — Template_Engine (foreach directive)
  * --------------------------------------------------------------------------
  *
- * Compares Progress Bar rendering performance (250,000 iterations).
+ * Compares foreach directive performance with 1,000,000 items.
  */
 
 $Runner = include __DIR__ . '/../runners/Code.php';
@@ -15,14 +15,14 @@ $Runner->iterations = 1;
 $loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
 if (getenv('BENCHMARK_HELP') !== '1' && $loadSet !== 'default') {
    fwrite(STDERR,
-      "Progress_Bar benchmark: single load set 'default'. "
+      "Template_Engine benchmark: single load set 'default'. "
       . "Pass --loads=default:<indexes> (e.g. --loads=default:*).\n"
    );
    exit(1);
 }
 
-// @ Auto-register opponents — each folder self-registers via its own @.php
-foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
+// @ Auto-register opponents — each folder self-registers via its own autoboot.php
+foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
    require $opponentFile;
 }
 

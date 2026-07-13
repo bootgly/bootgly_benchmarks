@@ -28,8 +28,8 @@ if (getenv('BENCHMARK_HELP') !== '1' && $loadSet !== 'default') {
    exit(1);
 }
 
-// @ Auto-register opponents — each driver folder self-registers via its own @.php
-foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
+// @ Auto-register opponents — each driver folder self-registers via its own autoboot.php
+foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
    require $opponentFile;
 }
 

@@ -57,8 +57,8 @@ $loadDir = match ($loadSet) {
 };
 $Runner->load(__DIR__ . $loadDir);
 
-// @ Auto-register opponents — each folder self-registers via its own @.php
-foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
+// @ Auto-register opponents — each folder self-registers via its own autoboot.php
+foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
    require $opponentFile;
 }
 

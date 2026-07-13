@@ -87,8 +87,8 @@ used by `TCP_Raw`).
 | **Bootgly** UDP Server CLI | PHP (event-loop) | Baseline | all loads |
 
 Each opponent lives in its own folder under `opponents/` and self-registers via
-its own `@.php` (auto-discovered with `glob(opponents/*/@.php)` — you never edit the
-case's main `@.php`).
+its own `autoboot.php` (auto-discovered with `glob(opponents/*/autoboot.php)` — you never edit the
+case's main `autoboot.php`).
 
 ---
 

@@ -1,51 +1,43 @@
 <?php
 /*
  * --------------------------------------------------------------------------
- * Bootgly Benchmarks — TCP_Server_CLI
+ * Bootgly Benchmarks — UDP_Server_CLI
  * --------------------------------------------------------------------------
- * Raw TCP server benchmark — measures framework overhead without HTTP parsing.
+ * Raw UDP server benchmark — measures framework overhead without HTTP or
+ * TCP framing. Each datagram is echoed back verbatim.
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ACI\Tests\Benchmark\Runner;
-
-
 // @ Select runner
-$runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'tcp_raw');
+$runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'udp_raw');
 
 $runnerFile = match ($runnerType) {
-   'tcp_raw', 'tcp_client' => 'TCP_Raw',
-   default                 => ucfirst($runnerType),
+   'udp_raw' => 'UDP_Raw',
+   default   => ucfirst($runnerType),
 };
-$runnerPath = __DIR__ . "/../runners/{$runnerFile}.php";
-
-/** @var Runner|false $Runner */
-$Runner = is_file($runnerPath) ? include $runnerPath : false;
-if ($Runner instanceof Runner === false) {
-   return false;
-}
+$Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 
 // ? Load set — explicit `default` required (single-set case, no silent default).
 //   Skipped under --help (BENCHMARK_HELP), which only needs the Runner options.
 $loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
 if (getenv('BENCHMARK_HELP') !== '1' && $loadSet !== 'default') {
    fwrite(STDERR,
-      "TCP_Server_CLI benchmark: single load set 'default'. "
+      "UDP_Server_CLI benchmark: single load set 'default'. "
       . "Pass --loads=default:<indexes> (e.g. --loads=default:*).\n"
    );
    exit(1);
 }
 
 // @ Configure
-$Runner->port = 8083;
+$Runner->port = 8084;
 $Runner->connections = 514;
 $Runner->duration = 10;
 
 // @ Load PHP loads
 $Runner->load(__DIR__ . '/loads');
 
-// @ Auto-register opponents — each folder self-registers via its own @.php
-foreach (glob(__DIR__ . '/opponents/*/@.php') as $opponentFile) {
+// @ Auto-register opponents — each folder self-registers via its own autoboot.php
+foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
    require $opponentFile;
 }
 

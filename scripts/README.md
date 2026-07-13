@@ -18,6 +18,12 @@ python3 -m venv .venv
 
 Requires Python 3.10+ and matplotlib.
 
+Run the parser/report regressions with:
+
+```bash
+MPLCONFIGDIR=/tmp/bootgly-matplotlib .venv/bin/python -m unittest discover -s tests
+```
+
 ### Input format
 
 `chart.py` expects `.bench.marks` files emitted by Bootgly v0.16-beta or
@@ -27,9 +33,14 @@ newer, which include a `# Config:` header block:
 # Benchmark: HTTP_Server_CLI
 # Date: 2026-05-31 23:12:46
 # Config:
+#   benchmarks-dirty: false
+#   benchmarks-sha: edbc7eb000000000000000000000000000000000
 #   client-workers: 12
 #   connections: 514
 #   duration: 10
+#   framework-dirty: false
+#   framework-sha: 92775ac800000000000000000000000000000000
+#   framework-version: 0.24.0-beta
 #   pipeline: 1
 #   runner: tcp_client
 #   load-set: techempower
@@ -40,6 +51,18 @@ newer, which include a `# Config:` header block:
 ```
 
 Files without `# Config:` are rejected with a clear error.
+
+Bootgly captures `framework-sha` / `framework-dirty` and
+`benchmarks-sha` / `benchmarks-dirty` before loading or running the case.
+Dirty state includes staged, unstaged, untracked, and dirty-submodule changes.
+When `.git` is unavailable, such as in a packaged container image, the producer
+uses `BOOTGLY_FRAMEWORK_SHA`, `BOOTGLY_FRAMEWORK_DIRTY`,
+`BOOTGLY_BENCHMARKS_SHA`, and `BOOTGLY_BENCHMARKS_DIRTY` as validated
+fallbacks; otherwise the value is explicitly `unknown`.
+
+Provenance keys are never selected automatically as a chart X axis. Generated
+reports display shared source identity and warn when input marks mix revisions
+or contain a dirty source tree.
 
 ### Usage
 

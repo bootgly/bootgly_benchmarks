@@ -56,6 +56,17 @@ CONFIG_LINE = re.compile(r"^#\s{3}([a-zA-Z][\w-]*):\s*(.+?)\s*$")
 RESULT_LINE = re.compile(r"^\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
 KV = re.compile(r"(\w+)=([^\s]+)")
 
+# Source identity describes an observation; it is not a tunable benchmark axis.
+# Keep it out of automatic X-axis discovery while still allowing an explicit
+# `--x-key framework-sha` for a deliberate cross-revision comparison.
+PROVENANCE_KEYS = (
+    "framework-version",
+    "framework-sha",
+    "framework-dirty",
+    "benchmarks-sha",
+    "benchmarks-dirty",
+)
+
 # Preferred X axis when multiple config keys vary.
 X_PREFERENCE = (
     "server-workers",
@@ -199,6 +210,8 @@ def detect_x_key(parsed: list[dict], override: str | None) -> str:
     keys: dict[str, set[str]] = {}
     for p in parsed:
         for k, v in p["config"].items():
+            if k in PROVENANCE_KEYS:
+                continue
             keys.setdefault(k, set()).add(v)
     varying = {k: vals for k, vals in keys.items() if len(vals) > 1}
     if not varying:
@@ -532,6 +545,11 @@ def write_report(
         if label in env:
             lines.append(f"- **{label}** — {env[label]}")
     for label, key in (
+        ("Framework version", "framework-version"),
+        ("Framework SHA", "framework-sha"),
+        ("Framework dirty", "framework-dirty"),
+        ("Benchmarks SHA", "benchmarks-sha"),
+        ("Benchmarks dirty", "benchmarks-dirty"),
         ("Runner", "runner"),
         ("Load set", "load-set"),
         ("Connections", "connections"),
@@ -636,6 +654,28 @@ def write_report(
     # ## Notes
     lines.append("## Notes")
     lines.append("")
+    mixed_provenance: list[str] = []
+    for key in PROVENANCE_KEYS:
+        values = {p["config"].get(key, "<missing>") for p in parsed}
+        if len(values) > 1:
+            mixed_provenance.append(f"`{key}` = " + ", ".join(f"`{v}`" for v in sorted(values)))
+    if mixed_provenance:
+        lines.append(
+            "- **Mixed source provenance:** "
+            + "; ".join(mixed_provenance)
+            + ". Treat the combined series as a cross-source comparison."
+        )
+    dirty_sources = [
+        label
+        for label, key in (("framework", "framework-dirty"), ("benchmark suite", "benchmarks-dirty"))
+        if shared.get(key) == "true"
+    ]
+    if dirty_sources:
+        lines.append(
+            "- **Dirty source tree:** "
+            + " and ".join(dirty_sources)
+            + " contained uncommitted or untracked changes when the benchmark started."
+        )
     if any_na:
         lines.append(
             "- One or more cells are `N/A`. The Bootgly benchmark runner emits"

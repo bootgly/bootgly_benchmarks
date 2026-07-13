@@ -741,7 +741,9 @@ baseline:
 ### Saved marks
 
 Each run saves a plain-text `.bench.marks` file (easy to diff or archive) — the
-input to the chart tooling:
+input to the chart tooling. Its Config header records the framework and
+benchmark-suite Git SHAs plus dirty state (`unknown` when source metadata is not
+available), so results remain attributable after the working session ends:
 
 ```
 bootgly/storage/tests/benchmarks/HTTP_Server_CLI/<timestamp>_bench.marks

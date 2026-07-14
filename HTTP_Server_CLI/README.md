@@ -537,7 +537,7 @@ Three global options control what a run prints and generates:
 | Option | Values | Effect |
 |--------|--------|--------|
 | `--output` | `full` \| `compact` (default: auto) | Output style. `compact` prints the banner/system/opponents blocks once and a short header per round — the automatic choice when sweeping. |
-| `--format` | `text` \| `json` (default: `text`) | Results serialization. `json` prints **only** a single machine-readable JSON document (all rounds, per-round `.marks` paths, artifact paths) — all human-readable output is suppressed, so the output pipes straight into `jq`. |
+| `--format` | `text` \| `json` (default: `text`) | Results serialization. After pre-run validation succeeds, `json` prints **only** a single machine-readable JSON document (all rounds, per-round `.marks` paths, artifact paths), so successful output pipes straight into `jq`. Pre-run validation errors still use human-readable alerts pending the output-isolation P0. |
 | `--results` | `marks` \| `report` \| `charts` (default: `marks`) | Generated artifacts (inclusive levels). `report` also writes a `RESULTS-<set>-<ts>.md`; `charts` adds native SVG charts (throughput / ratio / latency) — no Python required. |
 
 Reports and charts are written to
@@ -634,7 +634,7 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`<set>:*` for all, `<set>:1,2` to filter) |
 | `--server-workers=N\|A..B\|A..B:S\|N,N` | Server workers — sweep values run one round each (see [Sweeps](#sweeps)) |
 | `--output=full\|compact` | Output style (default: auto — compact when sweeping) |
-| `--format=text\|json` | Results serialization (json = prints only the JSON document) |
+| `--format=text\|json` | Results serialization (after successful pre-run validation, json prints only the JSON document) |
 | `--results=marks\|report\|charts` | Generated artifacts (see [Output, format and results](#output-format-and-results)) |
 
 ---
@@ -742,8 +742,21 @@ baseline:
 
 Each run saves a plain-text `.bench.marks` file (easy to diff or archive) — the
 input to the chart tooling. Its Config header records the framework and
-benchmark-suite Git SHAs plus dirty state (`unknown` when source metadata is not
-available), so results remain attributable after the working session ends:
+benchmark-suite Git SHAs plus dirty state. It also records SHA-256 fingerprints
+for a raw tracked-byte/executable-mode delta and the internal non-ignored
+untracked-input manifest, with `source-identity-version` identifying their
+encoding. When
+known, those values distinguish dirty worktrees at the same commit without
+placing raw patches, paths, or source content in the artifact. A value is
+`unknown` when source metadata is unavailable or a live tree cannot be
+fingerprinted safely. Git clean/smudge and EOL filters are bypassed. Ignored
+files, dependencies, environment, and external runtime state remain outside
+this source identity. Live Git identity is captured again after each measured
+round, and incomplete or changed provenance prevents that result from being
+saved. Git-less packages can only reconfirm their fallback tuple and therefore
+require an immutable attributed source layer or mount. A `false` dirty value is
+valid only when both fingerprints equal the standard empty SHA-256 digest; an
+index-only staged delta can validly produce `true` with both fingerprints empty:
 
 ```
 bootgly/storage/tests/benchmarks/HTTP_Server_CLI/<timestamp>_bench.marks

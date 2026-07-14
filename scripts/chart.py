@@ -55,16 +55,22 @@ _LAT_TICKS = FuncFormatter(
 CONFIG_LINE = re.compile(r"^#\s{3}([a-zA-Z][\w-]*):\s*(.+?)\s*$")
 RESULT_LINE = re.compile(r"^\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
 KV = re.compile(r"(\w+)=([^\s]+)")
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 # Source identity describes an observation; it is not a tunable benchmark axis.
 # Keep it out of automatic X-axis discovery while still allowing an explicit
 # `--x-key framework-sha` for a deliberate cross-revision comparison.
 PROVENANCE_KEYS = (
+    "source-identity-version",
     "framework-version",
     "framework-sha",
     "framework-dirty",
+    "framework-tracked-diff-sha256",
+    "framework-untracked-manifest-sha256",
     "benchmarks-sha",
     "benchmarks-dirty",
+    "benchmarks-tracked-diff-sha256",
+    "benchmarks-untracked-manifest-sha256",
 )
 
 # Preferred X axis when multiple config keys vary.
@@ -545,11 +551,16 @@ def write_report(
         if label in env:
             lines.append(f"- **{label}** — {env[label]}")
     for label, key in (
+        ("Source identity version", "source-identity-version"),
         ("Framework version", "framework-version"),
         ("Framework SHA", "framework-sha"),
         ("Framework dirty", "framework-dirty"),
+        ("Framework tracked diff SHA-256", "framework-tracked-diff-sha256"),
+        ("Framework untracked manifest SHA-256", "framework-untracked-manifest-sha256"),
         ("Benchmarks SHA", "benchmarks-sha"),
         ("Benchmarks dirty", "benchmarks-dirty"),
+        ("Benchmarks tracked diff SHA-256", "benchmarks-tracked-diff-sha256"),
+        ("Benchmarks untracked manifest SHA-256", "benchmarks-untracked-manifest-sha256"),
         ("Runner", "runner"),
         ("Load set", "load-set"),
         ("Connections", "connections"),
@@ -654,6 +665,41 @@ def write_report(
     # ## Notes
     lines.append("## Notes")
     lines.append("")
+    incomplete_provenance: list[str] = []
+    for marks_path, point in zip(marks_paths, parsed):
+        config = point["config"]
+        reasons: list[str] = []
+        if config.get("source-identity-version") != "raw-delta-manifest-v1":
+            reasons.append("unsupported or missing identity version")
+        for prefix in ("framework", "benchmarks"):
+            sha = config.get(f"{prefix}-sha", "")
+            dirty = config.get(f"{prefix}-dirty", "")
+            tracked = config.get(f"{prefix}-tracked-diff-sha256", "")
+            untracked = config.get(f"{prefix}-untracked-manifest-sha256", "")
+            valid_sha = re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is not None
+            valid_tracked = re.fullmatch(r"[0-9a-f]{64}", tracked) is not None
+            valid_untracked = re.fullmatch(r"[0-9a-f]{64}", untracked) is not None
+            if (
+                not valid_sha
+                or dirty not in ("true", "false")
+                or not valid_tracked
+                or not valid_untracked
+                or (
+                    dirty == "false"
+                    and (tracked != EMPTY_SHA256 or untracked != EMPTY_SHA256)
+                )
+            ):
+                reasons.append(f"incomplete {prefix} tuple")
+        if reasons:
+            incomplete_provenance.append(
+                f"`{Path(marks_path).name}` ({', '.join(reasons)})"
+            )
+    if incomplete_provenance:
+        lines.append(
+            "- **Incomplete source provenance:** "
+            + "; ".join(incomplete_provenance)
+            + ". Do not group these points as the same attributable source."
+        )
     mixed_provenance: list[str] = []
     for key in PROVENANCE_KEYS:
         values = {p["config"].get(key, "<missing>") for p in parsed}

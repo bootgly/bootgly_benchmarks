@@ -16,17 +16,33 @@ use Swoole\Http\Server;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
 
-$server = new Server('0.0.0.0', 8082, SWOOLE_BASE);
-$server->set([
+$serverDirectory = getenv('BENCHMARK_SERVER_DIR');
+$logFile = is_string($serverDirectory) && $serverDirectory !== ''
+   ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.log'
+   : '/dev/null';
+$PIDFile = getenv('SWOOLE_PID_FILE');
+$PIDFile = is_string($PIDFile) && $PIDFile !== ''
+   ? $PIDFile
+   : (is_string($serverDirectory) && $serverDirectory !== ''
+      ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.pid'
+      : null);
+$port = getenv('SERVER_PORT') ?: '8082';
+
+$Server = new Server('0.0.0.0', is_numeric($port) ? (int) $port : 8082, SWOOLE_BASE);
+$settings = [
    'worker_num' => (int) (getenv('SERVER_WORKER_NUM') ?: shell_exec('nproc') / 2) ?: 1,
-   //'daemonize'  => true,
-   'log_file'   => '/dev/null',
+   'daemonize' => false,
+   'log_file'   => $logFile,
    'enable_reuse_port' => true,
    'http_compression'  => false,
    // Corroutine
    'enable_coroutine' => false,
    'hook_flags' => SWOOLE_HOOK_ALL,
-]);
+];
+if ($PIDFile !== null) {
+   $settings['pid_file'] = $PIDFile;
+}
+$Server->set($settings);
 
 $static = [
    '/'        => 'Home',
@@ -45,7 +61,7 @@ for ($i = 11; $i <= 100; $i++) {
    $static["/static/{$i}"] = "Static {$i}";
 }
 
-$server->on('request', function (Request $request, Response $response) use ($static) {
+$Server->on('request', function (Request $request, Response $response) use ($static) {
    $path = $request->server['request_uri'];
 
    $response->header('Content-Type', 'text/plain');
@@ -116,4 +132,4 @@ $server->on('request', function (Request $request, Response $response) use ($sta
    $response->end('Not Found');
 });
 
-$server->start();
+$Server->start();

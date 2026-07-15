@@ -114,18 +114,19 @@ case: `iterations = 3` (best per label kept), `warmup = 1`.
 cd bootgly
 
 # All drivers (unavailable ones show N/A)
-./bootgly test benchmark Cache
+./bootgly test benchmark Cache --loads=default:* --opponents=file,apcu,shared,redis
 
 # Only the always-available driver
-./bootgly test benchmark Cache --opponents=file
+./bootgly test benchmark Cache --loads=default:* --opponents=file
 
 # File vs Shared, more stable
-./bootgly test benchmark Cache --opponents=file,shared --warmup=2 --iterations=5
+./bootgly test benchmark Cache --loads=default:* --opponents=file,shared --warmup=2 --iterations=5
 ```
 
-Each run also writes a `.marks` file under
-`bootgly/storage/tests/benchmarks/Cache/` with one
-`[driver][operation] time=… memory=…` line per cell, for trend tracking.
+Each run also writes
+`bootgly/storage/tests/benchmarks/Cache/runs/<run-id>/marks/result_bench.marks`
+with one `[driver][operation] time=… memory=…` line per cell, for trend
+tracking.
 
 ---
 

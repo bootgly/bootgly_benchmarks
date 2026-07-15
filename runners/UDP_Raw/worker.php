@@ -52,9 +52,12 @@ if (!\defined('BOOTGLY_VERSION')) {
 
 
 use Bootgly\ACI\Events\Timer;
-use Bootgly\ACI\Logs\Logger;
+use Bootgly\ACI\Logs\Data\Display;
+use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\WPI\Interfaces\UDP_Client_CLI;
 use Bootgly\WPI\Interfaces\UDP_Client_CLI\Events;
+
+require_once __DIR__ . '/../RunArtifacts.php';
 
 
 // ---------------------------------------------------------------------------
@@ -120,7 +123,7 @@ if ($connectionsPerWorker > $maxFdsPerWorker) {
 // ---------------------------------------------------------------------------
 // Suppress log output — we only want the JSON result on stdout
 // ---------------------------------------------------------------------------
-Logger::$display = Logger::DISPLAY_NONE;
+Display::show(Display::NONE);
 
 
 // ---------------------------------------------------------------------------
@@ -225,13 +228,13 @@ function runWorker (
    $elapsed = microtime(true) - $startTime;
 
    if ($statsFile !== null) {
-      file_put_contents($statsFile, json_encode([
+      RunArtifacts::commit($statsFile, json_encode([
          'responses'     => $responsesReceived,
          'bytes_read'    => $bytesRead,
          'elapsed'       => $elapsed,
          'latency_sum'   => $latencySum,
          'latency_count' => $latencyCount,
-      ]));
+      ], JSON_THROW_ON_ERROR));
    } else {
       outputResults($responsesReceived, $bytesRead, $elapsed, $latencySum, $latencyCount);
    }
@@ -279,51 +282,79 @@ if ($requestedWorkers <= 1) {
    exit(0);
 }
 
-// @ Multi-worker: fork N children
-$tmpDir    = sys_get_temp_dir();
-$statsBase = "{$tmpDir}/bootgly_udp_bench_" . \getmypid() . '_';
-$childPids = [];
+// @ Multi-worker: fork N children into this invocation's exclusive workspace.
+$Artifacts = RunArtifacts::create('udp-raw-workers');
+$childPIDs = [];
+$childFiles = [];
+$childStatuses = [];
+$forkFailed = false;
 
 for ($w = 0; $w < $requestedWorkers; $w++) {
-   $pid = \pcntl_fork();
+   $PID = \pcntl_fork();
 
-   if ($pid === 0) {
-      $statsFile = "{$statsBase}" . \getmypid() . '.json';
+   if ($PID === 0) {
+      $statsFile = $Artifacts->resolve('child-' . \getmypid() . '.json');
       runWorker($host, $port, $connectionsPerWorker, $duration,
                 $message, $statsFile);
       exit(0);
-   } elseif ($pid > 0) {
-      $childPids[] = $pid;
+   } elseif ($PID > 0) {
+      $childPIDs[] = $PID;
+      $childFiles[$PID] = $Artifacts->resolve("child-{$PID}.json");
    } else {
+      $forkFailed = true;
       \fwrite(\STDERR, "ERROR: pcntl_fork() failed.\n");
    }
 }
 
 // @ Parent: wait for all children
-foreach ($childPids as $pid) {
-   \pcntl_waitpid($pid, $status);
+foreach ($childPIDs as $PID) {
+   $waited = \pcntl_waitpid($PID, $status);
+   $childStatuses[$PID] = $waited === $PID
+      && \pcntl_wifexited($status)
+      && \pcntl_wexitstatus($status) === 0;
 }
 
-// @ Aggregate stats from temp files
+// @ Aggregate only the exact file assigned to each successful child PID.
 $totalResponses    = 0;
 $totalBytesRead    = 0;
 $maxElapsed        = 0.0;
 $totalLatencySum   = 0.0;
 $totalLatencyCount = 0;
+$validAggregation = !$forkFailed && count($childPIDs) === $requestedWorkers;
 
-$statsFiles = glob("{$statsBase}*.json") ?: [];
-foreach ($statsFiles as $file) {
-   $data = json_decode((string) file_get_contents($file), true);
-   if (!\is_array($data)) continue;
+foreach ($childPIDs as $PID) {
+   $file = $childFiles[$PID];
+   $contents = @file_get_contents($file);
+   $data = $contents === false ? null : json_decode($contents, true);
+   $elapsed = $data['elapsed'] ?? null;
+   $latencySum = $data['latency_sum'] ?? null;
+   $valid = ($childStatuses[$PID] ?? false)
+      && \is_array($data)
+      && \is_int($data['responses'] ?? null) && $data['responses'] >= 0
+      && \is_int($data['bytes_read'] ?? null) && $data['bytes_read'] >= 0
+      && \is_int($data['latency_count'] ?? null) && $data['latency_count'] >= 0
+      && (\is_int($elapsed) || \is_float($elapsed))
+      && \is_finite((float) $elapsed) && (float) $elapsed > 0
+      && (\is_int($latencySum) || \is_float($latencySum))
+      && \is_finite((float) $latencySum) && (float) $latencySum >= 0;
 
-   $totalResponses    += $data['responses']      ?? 0;
-   $totalBytesRead    += $data['bytes_read']      ?? 0;
-   $maxElapsed         = max($maxElapsed, (float) ($data['elapsed']        ?? 0.0));
-   $totalLatencySum   += (float) ($data['latency_sum']   ?? 0.0);
-   $totalLatencyCount += (int)   ($data['latency_count'] ?? 0);
+   if ($valid) {
+      $totalResponses += $data['responses'];
+      $totalBytesRead += $data['bytes_read'];
+      $maxElapsed = max($maxElapsed, (float) $elapsed);
+      $totalLatencySum += (float) $latencySum;
+      $totalLatencyCount += $data['latency_count'];
+   }
 
-   @\unlink($file);
+   $validAggregation = $validAggregation && $valid;
+}
+
+if (!$validAggregation) {
+   \fwrite(\STDERR, "ERROR: one or more benchmark workers failed or produced invalid stats.\n");
+   $Artifacts->clean();
+   exit(1);
 }
 
 outputResults($totalResponses, $totalBytesRead, $maxElapsed, $totalLatencySum, $totalLatencyCount);
+$Artifacts->clean();
 exit(0);

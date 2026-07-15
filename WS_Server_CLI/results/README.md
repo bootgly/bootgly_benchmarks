@@ -65,8 +65,9 @@ has its **own full server-workers sweep (1 → 24)** with its own optimum:
   - `RESULTS-echo-pipelined-*` — Echo 32B (pipelined x16), server-workers sweep @ 512 conns (msg/s)
   - `RESULTS-broadcast-*` — Broadcast fan-out, connections sweep (msg/s)
   - `RESULTS-connect-*` — Connect rate, connections sweep (conn/s)
-- Source `.bench.marks` files live in
-  `bootgly/storage/tests/benchmarks/WS_Server_CLI/` (gitignored).
+- Source `.bench.marks` files live below
+  `bootgly/storage/tests/benchmarks/WS_Server_CLI/runs/<run-id>/marks/`
+  (gitignored).
 
 ## Regenerate
 
@@ -100,10 +101,11 @@ fresh temp dir — the source `.marks` are never deleted. From
 `bootgly_benchmarks/scripts`:
 
 ```bash
-MARKS=../../bootgly/storage/tests/benchmarks/WS_Server_CLI
+RUNS=../../bootgly/storage/tests/benchmarks/WS_Server_CLI/runs
 chart () {  # <grep -F pattern> <output load-set> [title]
   stage=$(mktemp -d)
-  grep -lF "$1" "$MARKS"/*_bench.marks | xargs -I{} cp {} "$stage"/
+  grep -rlF --include='*_bench.marks' "$1" "$RUNS" |
+    xargs -r -I{} cp "{}" "$stage"/
   .venv/bin/python3 chart.py --marks "$stage/*_bench.marks" \
     --out ../WS_Server_CLI/results/ --baseline Bootgly --load-set "$2" ${3:+--title "$3"}
 }

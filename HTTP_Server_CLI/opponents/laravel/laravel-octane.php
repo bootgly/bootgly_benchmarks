@@ -26,6 +26,10 @@
  *   php laravel-octane.php stop
  */
 
+use Bootgly\Benchmarks\Runners\ServerCapture;
+
+require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
+
 $bootablesDir = realpath(__DIR__ . '/../../bootables/laravel');
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
@@ -47,10 +51,10 @@ if (extension_loaded('swoole') === false || is_file("{$bootablesDir}/vendor/auto
 
 $action = $argv[1] ?? 'start';
 
-match ($action) {
+$exit = match ($action) {
    // @ Start Octane on Swoole in the foreground (the runner backgrounds it). Bootgly
    //   DB_* are mapped to Laravel's DB_* names; production env, Xdebug off.
-   'start' => (function () use ($bootablesDir, $port, $workers) {
+   'start' => (function () use ($bootablesDir, $port, $workers): int {
       $db = sprintf(
          'DB_CONNECTION=pgsql DB_HOST=%s DB_PORT=%s DB_DATABASE=%s DB_USERNAME=%s DB_PASSWORD=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
@@ -60,18 +64,21 @@ match ($action) {
          escapeshellarg(getenv('DB_PASS') ?: '')
       );
 
-      exec(
+      return ServerCapture::run(
          "cd {$bootablesDir} && {$db}APP_ENV=production XDEBUG_MODE=off "
          . "php artisan octane:start --server=swoole --host=0.0.0.0 "
-         . "--port={$port} --workers={$workers} --max-requests=100000000 > /dev/null 2>&1"
+         . "--port={$port} --workers={$workers} --max-requests=100000000"
       );
    })(),
 
    // @ Kill the Octane master (which brings down its Swoole workers), then free the port.
-   'stop' => (function () use ($port) {
+   'stop' => (function () use ($port): int {
       exec("pkill -9 -f 'octane:start' > /dev/null 2>&1");
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
+      return 0;
    })(),
 
-   default => exit(1),
+   default => 1,
 };
+
+exit($exit);

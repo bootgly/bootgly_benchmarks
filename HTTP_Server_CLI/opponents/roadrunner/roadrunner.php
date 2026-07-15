@@ -25,6 +25,10 @@
  *   php roadrunner.php stop
  */
 
+use Bootgly\Benchmarks\Runners\ServerCapture;
+
+require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
+
 $bootablesDir = realpath(__DIR__ . '/../../bootables/roadrunner');
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
@@ -49,10 +53,10 @@ if (is_executable("{$bootablesDir}/rr") === false) {
 
 $action = $argv[1] ?? 'start';
 
-match ($action) {
+$exit = match ($action) {
    // @ Serve in the foreground (the runner backgrounds it). For techempower swap the
    //   pool command to the TFB worker; otherwise keep the .rr.yaml default.
-   'start' => (function () use ($bootablesDir, $workers, $techempower) {
+   'start' => (function () use ($bootablesDir, $workers, $techempower): int {
       $db = sprintf(
          'DB_HOST=%s DB_PORT=%s DB_NAME=%s DB_USER=%s DB_PASS=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
@@ -66,20 +70,23 @@ match ($action) {
          ? ' -o "server.command=php worker-techempower.php"'
          : '';
 
-      exec(
+      return ServerCapture::run(
          "cd {$bootablesDir} && {$db}"
          . "./rr serve -c .rr.yaml -o http.address=0.0.0.0:8082 "
-         . "-o http.pool.num_workers={$workers}{$command} > /dev/null 2>&1"
+         . "-o http.pool.num_workers={$workers}{$command}"
       );
    })(),
 
    // @ Kill the rr supervisor (and its worker pool) by argv pattern, then free the port.
-   'stop' => (function () use ($port) {
+   'stop' => (function () use ($port): int {
       exec("pkill -9 -f 'rr serve' > /dev/null 2>&1");
       exec("pkill -9 -f 'worker-techempower.php' > /dev/null 2>&1");
       exec("pkill -9 -f 'worker.php' > /dev/null 2>&1");
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
+      return 0;
    })(),
 
-   default => exit(1),
+   default => 1,
 };
+
+exit($exit);

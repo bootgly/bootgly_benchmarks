@@ -16,11 +16,16 @@ use Swoole\Http\Server;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
 
+$serverDirectory = getenv('BENCHMARK_SERVER_DIR');
+$logFile = is_string($serverDirectory) && $serverDirectory !== ''
+   ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.log'
+   : '/dev/null';
+
 $server = new Server('0.0.0.0', 8082, SWOOLE_PROCESS);
 $server->set([
    'worker_num' => (int) (getenv('SERVER_WORKER_NUM') ?: shell_exec('nproc') / 2) ?: 1,
    'daemonize'  => true,
-   'log_file'   => '/dev/null',
+   'log_file'   => $logFile,
 ]);
 
 $static = [

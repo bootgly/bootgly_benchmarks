@@ -569,30 +569,27 @@ def write_report(
         ("Client workers", "client-workers"),
         ("Pipeline", "pipeline"),
         ("DB pool max", "db-pool-max"),
+        ("DB pool comparability", "db-pool-comparability"),
     ):
         if key in shared:
             lines.append(f"- **{label}** — `{shared[key]}`")
     if "db-pool-max" in shared:
         pool = shared["db-pool-max"]
-        pooled = [c for c in opponents if "laravel" not in c.lower()]
-        laravel = [c for c in opponents if "laravel" in c.lower()]
-        note = (
-            f"> **Equal per-worker DB connection — pool = `{pool}` for every framework.** "
-            f"{', '.join(pooled)} inherit `DB_POOL_MAX={pool}` from the runner environment, so each "
-            f"worker holds at most {pool} PostgreSQL connection(s)."
-        )
-        if laravel:
-            note += (
-                f" {', '.join(laravel)} runs PHP-FPM with `pm.max_children = server-workers`, so each "
-                "FPM child also opens exactly one connection — matching the pooled servers' "
-                "per-worker footprint."
-            )
-        note += (
-            f" Every opponent therefore presents the same database footprint at each point "
-            f"(`server-workers` connections total), so no framework gets a connection-count advantage."
-        )
         lines.append("")
-        lines.append(note)
+        if shared.get("db-pool-comparability") == "capability-validated-v1":
+            lines.append(
+                f"> **Configured per-worker DB ceiling validated at `{pool}`.** "
+                "The harness accepted these results only after matching every selected opponent "
+                "to a source-inspected pool-aware implementation or a fixed-one implementation "
+                "whose ceiling equals the requested value. This validates the configured ceiling; "
+                "it does not claim that this many PostgreSQL sessions were simultaneously open."
+            )
+        else:
+            lines.append(
+                f"> **Requested DB pool ceiling recorded as `{pool}`, but effective parity is unverified.** "
+                "These artifacts do not carry the harness capability contract, so the shared value "
+                "alone must not be interpreted as proof that every opponent honored it."
+            )
     lines.append("")
 
     # ## Command

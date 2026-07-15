@@ -23,6 +23,10 @@
  *   php reactphp.php stop
  */
 
+use Bootgly\Benchmarks\Runners\ServerCapture;
+
+require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
+
 $bootablesDir = realpath(__DIR__ . '/../../bootables/reactphp');
 $bootable = 'reactphp-techempower.php';
 
@@ -44,9 +48,9 @@ if (is_file("{$bootablesDir}/vendor/autoload.php") === false) {
 
 $action = $argv[1] ?? 'start';
 
-match ($action) {
+$exit = match ($action) {
    // @ Launch the async TechEmpower server in the foreground (the runner backgrounds it).
-   'start' => (function () use ($bootablesDir, $workers, $bootable) {
+   'start' => (function () use ($bootablesDir, $workers, $bootable): int {
       $db = sprintf(
          'DB_HOST=%s DB_PORT=%s DB_NAME=%s DB_USER=%s DB_PASS=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
@@ -56,17 +60,20 @@ match ($action) {
          escapeshellarg(getenv('DB_PASS') ?: '')
       );
 
-      exec(
+      return ServerCapture::run(
          "cd {$bootablesDir} && {$db}BOOTGLY_WORKERS={$workers} "
-         . "php {$bootable} > /dev/null 2>&1"
+         . "php {$bootable}"
       );
    })(),
 
    // @ Kill the bootable (and its forked workers) by argv pattern, then free the port.
-   'stop' => (function () use ($port, $bootable) {
+   'stop' => (function () use ($port, $bootable): int {
       exec('pkill -9 -f ' . escapeshellarg($bootable) . ' > /dev/null 2>&1');
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
+      return 0;
    })(),
 
-   default => exit(1),
+   default => 1,
 };
+
+exit($exit);

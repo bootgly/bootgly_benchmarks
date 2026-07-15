@@ -112,9 +112,9 @@ or contain a dirty source tree.
 ### Usage
 
 ```bash
-# Server-workers sweep, DB loads — output goes to the case `results/`.
+# One server-workers sweep. Replace RUN_ID with the exact invocation to chart.
 .venv/bin/python3 chart.py \
-   --marks '../../bootgly/storage/tests/benchmarks/HTTP_Server_CLI/2026-05-31_*.marks' \
+   --marks '../../bootgly/storage/tests/benchmarks/HTTP_Server_CLI/runs/RUN_ID/marks/*_bench.marks' \
    --out ../HTTP_Server_CLI/results/ \
    --baseline Bootgly
 

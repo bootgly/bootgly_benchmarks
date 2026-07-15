@@ -14,6 +14,12 @@ use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
 use Bootgly\ACI\Tests\Benchmark\Configs\Load;
 use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
+use Bootgly\Benchmarks\Runners\RunArtifacts;
+use Bootgly\Benchmarks\Runners\RunProcess;
+use Bootgly\Benchmarks\Runners\ServerReadiness;
+
+require_once __DIR__ . '/RunArtifacts.php';
+require_once __DIR__ . '/ServerReadiness.php';
 
 
 return new class (
@@ -48,8 +54,11 @@ return new class (
    public int $readyTimeout = 10;
 
    // * Metadata
-   // # opponent start output (stdout+stderr) — surfaced when readiness fails
+   // # Opponent start output — surfaced when readiness fails.
+   private ?RunArtifacts $ServerArtifacts = null;
+   private ?RunProcess $ServerProcess = null;
    private string $serverLog = '';
+   private string $serverError = '';
 
 
    public function __construct (
@@ -90,13 +99,6 @@ return new class (
       $this->meta['client-workers'] = $this->workers;
       $this->meta['pipeline']       = $this->pipeline;
 
-      // # Database pool ceiling — identical for every opponent. Both Bootgly and
-      //   Swoole inherit DB_POOL_MAX from the runner environment, so recording it
-      //   in the .marks header proves the pool was the same on both sides.
-      $poolMax = getenv('DB_POOL_MAX');
-      if ($poolMax !== false && $poolMax !== '' && is_numeric($poolMax)) {
-         $this->meta['db-pool-max'] = (int) $poolMax;
-      }
    }
    public function options (): array
    {
@@ -134,22 +136,28 @@ return new class (
     */
    public function banner (Configs $Configs): array
    {
-      $sections = [];
-
-      // # Configuration
-      $defaultWorkers = max(1, (int) ((int)(exec('nproc 2>/dev/null') ?: 1) / 2));
-      $workersDisplay = (string) ($this->opponents[0]->workers ?? $defaultWorkers);
-
-      $clientFlags = "-c{$this->connections} -d{$this->duration}s";
-      $clientFlags .= ' -w' . $this->resolveClientWorkers();
-      if ($this->pipeline > 1) $clientFlags .= " -p{$this->pipeline}";
-
-      $sections['Configuration'] = [
-         'Client'  => "Bootgly TCP_Client_CLI {$clientFlags}",
-         'Warmup'  => "-c{$this->warmupConnections} -d{$this->warmupDuration}s",
-         'Port'    => (string) $this->port,
-         'Workers' => $workersDisplay,
+      $sections = [
+         'Client' => [
+            'Engine'         => 'Bootgly TCP_Client_CLI',
+            'Client workers' => (string) $this->resolveClientWorkers(),
+            'Connections'    => (string) $this->connections,
+            'Duration'       => "{$this->duration} s",
+            'Pipeline'       => (string) $this->pipeline,
+            'Warmup'         => "{$this->warmupConnections} connections · {$this->warmupDuration} s",
+         ],
+         'Server' => [
+            'Port' => (string) $this->port,
+         ],
       ];
+
+      if (isset($this->meta['db-pool-max'])) {
+         $sections['Database'] = [
+            'Pool max / worker' => (string) $this->meta['db-pool-max'],
+            'Parity'            => isset($this->meta['db-pool-comparability'])
+               ? 'Capability contract validated'
+               : 'Not applicable · no DB load selected',
+         ];
+      }
 
       return $sections;
    }
@@ -167,10 +175,19 @@ return new class (
 
       // @ Install SIGINT handler to stop server on CTRL+C
       $activeOpponent = null;
+      $stopping = false;
+      $interrupted = false;
       pcntl_async_signals(true);
-      pcntl_signal(SIGINT, function () use (&$activeOpponent) {
+      pcntl_signal(SIGINT, function () use (&$activeOpponent, &$stopping, &$interrupted) {
+         if ($stopping) {
+            $interrupted = true;
+            return;
+         }
          if ($activeOpponent !== null) {
-            $this->stopServer($activeOpponent);
+            $Opponent = $activeOpponent;
+            $activeOpponent = null;
+            $stopping = true;
+            $this->stopServer($Opponent);
          }
          exit(130);
       });
@@ -191,6 +208,8 @@ return new class (
             continue;
          }
 
+         putenv('BENCHMARK_PROFILE_SCOPE=' . Configs::slug($Opponent->name));
+
          // ! Server worker count — set by Runner::apply (or auto: nproc / 2)
          $workers = $Opponent->workers
             ?? max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
@@ -200,19 +219,44 @@ return new class (
 
          // @ Start server
          $activeOpponent = $Opponent;
+         $stopping = false;
+
+         try {
          echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
          $this->startServer($Opponent, $workers);
 
          // @ Wait for server readiness
-         if ( !$this->waitForServer() ) {
+         if ( !$this->waitForServer($Opponent) ) {
             echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n";
             // ? Surface the opponent's own start output (e.g. capability guard message).
-            $output = is_file($this->serverLog) ? trim((string) file_get_contents($this->serverLog)) : '';
+            $files = [
+               $this->serverLog,
+               $this->serverError,
+               $this->ServerArtifacts?->resolve('process.capture/stdout.log'),
+               $this->ServerArtifacts?->resolve('process.capture/stderr.log'),
+               $this->ServerArtifacts?->resolve('daemon/stdout.log'),
+               $this->ServerArtifacts?->resolve('daemon/stderr.log'),
+               $this->ServerArtifacts?->resolve('daemon.capture/stdout.log'),
+               $this->ServerArtifacts?->resolve('daemon.capture/stderr.log'),
+            ];
+            $output = '';
+            foreach ($files as $file) {
+               $output .= is_string($file) && is_file($file)
+                  ? (string) file_get_contents($file) . "\n"
+                  : '';
+            }
+            $output = trim($output);
             foreach ($output === '' ? [] : array_slice(explode("\n", $output), -6) as $line) {
                echo "    {$DIM}{$line}{$RESET}\n";
             }
             echo "\n";
+            $stopping = true;
             $this->stopServer($Opponent);
+            $activeOpponent = null;
+            $stopping = false;
+            if ($interrupted) {
+               exit(130);
+            }
             continue;
          }
 
@@ -263,8 +307,13 @@ return new class (
             $latency = $Result->latency !== null
                ? "  {$DIM}({$Result->latency}){$RESET}"
                : '';
+            $accounting = match ($Result->accounting) {
+               true => "  {$DIM}(responses={$Result->responses}, sent={$Result->sent}, failed={$Result->failed}, write-failed={$Result->writeFailed}, connection-failed={$Result->connectionFailed}){$RESET}",
+               false => "  {$RED}(accounting invalid){$RESET}",
+               null => '',
+            };
 
-            echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}\n";
+            echo "    {$DIM}[{$loadNum}/{$totalLoads}]{$RESET} {$Load->label}...  {$rps}{$transfer}{$latency}{$accounting}\n";
 
             $loadResults[$Load->label] = $Result;
          }
@@ -272,11 +321,37 @@ return new class (
          echo "\n";
 
          // @ Stop server
+         $stopping = true;
          $this->stopServer($Opponent);
          $activeOpponent = null;
+         $stopping = false;
+         if ($interrupted) {
+            exit(130);
+         }
 
          $results[$Opponent->name] = $loadResults;
+         }
+         catch (Throwable $Throwable) {
+            if (!$stopping && $activeOpponent !== null) {
+               $CleanupOpponent = $activeOpponent;
+               $activeOpponent = null;
+               $stopping = true;
+
+               try {
+                  $this->stopServer($CleanupOpponent);
+               }
+               catch (Throwable) {
+                  // @ Preserve the original benchmark failure.
+               }
+            }
+
+            $activeOpponent = null;
+            putenv('BENCHMARK_PROFILE_SCOPE');
+            throw $Throwable;
+         }
       }
+
+      putenv('BENCHMARK_PROFILE_SCOPE');
 
       return $results;
    }
@@ -291,46 +366,98 @@ return new class (
    {
       $script = $Opponent->script;
       putenv("BOOTGLY_WORKERS={$workers}");
-      // ! Capture start output — surfaced by the caller when readiness fails.
-      $this->serverLog = sys_get_temp_dir() . '/bootgly-benchmark-server.log';
-      @unlink($this->serverLog);
-      exec("BOOTGLY_WORKERS={$workers} php {$script} start > {$this->serverLog} 2>&1 &");
+      $this->ServerArtifacts?->clean();
+      $this->ServerArtifacts = RunArtifacts::create('tcp-client-server');
+      $this->serverLog = $this->ServerArtifacts->resolve('process/stdout.log');
+      $this->serverError = $this->ServerArtifacts->resolve('process/stderr.log');
+      $environment = [
+         'BENCHMARK_SERVER_DIR' => $this->ServerArtifacts->directory,
+         'BOOTGLY_WORKERS' => (string) $workers,
+      ];
+      if (isset($this->meta['db-pool-max'])) {
+         $environment['DB_POOL_MAX'] = (string) $this->meta['db-pool-max'];
+      }
+      $this->ServerProcess = $this->ServerArtifacts->start(
+         [PHP_BINARY, $script, 'start'],
+         $environment,
+      );
    }
    private function stopServer (Opponent $Opponent): void
    {
       $script = $Opponent->script;
-      exec("php {$script} stop > /dev/null 2>&1");
+      $Artifacts = RunArtifacts::create('tcp-client-server-stop');
+      $serverDirectory = $this->ServerArtifacts?->directory;
+      $environment = is_string($serverDirectory) && $serverDirectory !== ''
+         ? ['BENCHMARK_SERVER_DIR' => $serverDirectory]
+         : [];
 
-      sleep(1);
-      $this->killPort();
+      try {
+         $stop = $Artifacts->start(
+            [PHP_BINARY, $script, 'stop'],
+            $environment,
+         )->wait(10.0, 2.0);
+         if ($stop['exit'] !== 0) {
+            throw new RuntimeException(
+               "Benchmark opponent stop command failed with exit {$stop['exit']}: {$Opponent->name}"
+            );
+         }
+      }
+      finally {
+         $Artifacts->clean();
+         sleep(1);
+         $this->killPort();
+
+         try {
+            $this->ServerProcess?->wait(10.0, 2.0);
+         }
+         finally {
+            $this->ServerProcess = null;
+            $this->ServerArtifacts?->clean();
+            $this->ServerArtifacts = null;
+         }
+      }
    }
-   private function waitForServer (): bool
+   private function waitForServer (Opponent $Opponent): bool
    {
       $deadline = time() + $this->readyTimeout;
+      $swoole = basename($Opponent->script) === 'swoole.php';
+      $PIDFile = $swoole
+         ? $this->ServerArtifacts?->resolve('swoole.pid')
+         : null;
+      $bootable = strtolower((string) getenv('BENCHMARK_LOAD_SET')) === 'techempower'
+         ? 'swoole-techempower-postgres.php'
+         : 'swoole-base-routes.php';
 
       while (time() < $deadline) {
-         $socket = @fsockopen('127.0.0.1', $this->port, $errno, $errstr, 1);
+         if ($swoole) {
+            if ($this->ServerProcess === null || !$this->ServerProcess->check()) {
+               return false;
+            }
+            $identity = ServerReadiness::inspect($PIDFile, $bootable);
+            if ($identity === null) {
+               usleep(50_000);
 
-         if ($socket) {
-            // @ Port is open, but that is not enough: a php-fpm opponent (e.g.
-            //   Laravel) may still be preloading behind nginx/Apache, which
-            //   answer 502/503 in the meantime. Probe with a real request and
-            //   only accept it once the app itself responds.
-            stream_set_timeout($socket, 2);
-            fwrite($socket, "GET / HTTP/1.0\r\nHost: 127.0.0.1:{$this->port}\r\nConnection: close\r\n\r\n");
-            $response = fread($socket, 16);
-            fclose($socket);
-
-            if (
-               is_string($response)
-               && strncmp($response, 'HTTP/', 5) === 0
-               && preg_match('#^HTTP/\S+ 50[234]#', $response) !== 1
-            ) {
-               return true;
+               continue;
             }
          }
+         else {
+            $identity = null;
+         }
 
-         usleep(250_000);
+         if (!ServerReadiness::probe($this->port)) {
+            usleep(250_000);
+
+            continue;
+         }
+         if ($swoole && (
+            $this->ServerProcess === null
+            || !$this->ServerProcess->check()
+            || ServerReadiness::inspect($PIDFile, $bootable) !== $identity
+         )) {
+            return false;
+         }
+
+         return true;
       }
 
       return false;
@@ -349,28 +476,28 @@ return new class (
    {
       // @ Run worker.php with reduced load for warmup
       $workerScript = __DIR__ . '/TCP_Client/worker.php';
-
-      // @ Create a simple warmup paths file (just GET /)
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_warmup_');
-      if ($tmpFile === false) return;
-
-      file_put_contents($tmpFile, json_encode([
+      $Artifacts = RunArtifacts::create('tcp-client-warmup');
+      $JSON = json_encode([
          'method' => 'GET',
          'paths'  => ['/'],
-      ]));
+      ], JSON_THROW_ON_ERROR);
+      $input = $Artifacts->write('input.json', $JSON);
 
-      exec(
-         "php {$workerScript}"
-         . " --host=127.0.0.1"
-         . " --port={$this->port}"
-         . " --connections={$this->warmupConnections}"
-         . " --duration={$this->warmupDuration}"
-         . " --paths-file={$tmpFile}"
-         . " --workers={$this->resolveClientWorkers()}"
-         . " > /dev/null 2>&1"
-      );
-
-      @unlink($tmpFile);
+      try {
+         $Artifacts->run([
+            PHP_BINARY,
+            $workerScript,
+            '--host=127.0.0.1',
+            "--port={$this->port}",
+            "--connections={$this->warmupConnections}",
+            "--duration={$this->warmupDuration}",
+            "--paths-file={$input}",
+            '--workers=' . $this->resolveClientWorkers(),
+         ], $this->warmupDuration + 30.0, 2.0);
+      }
+      finally {
+         $Artifacts->clean();
+      }
    }
    private function command (Load $Load, int $connections = 0, int $clientWorkers = 0): Result
    {
@@ -404,34 +531,34 @@ return new class (
          return new Result();
       }
 
-      // @ Write load paths to temp file
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_load_');
-      if ($tmpFile === false) {
-         return new Result();
+      $Artifacts = RunArtifacts::create('tcp-client-load');
+      $JSON = json_encode($loadData, JSON_THROW_ON_ERROR);
+      $input = $Artifacts->write('input.json', $JSON);
+      $command = [
+         PHP_BINARY,
+         $workerScript,
+         '--host=127.0.0.1',
+         "--port={$this->port}",
+         "--connections={$connections}",
+         "--duration={$this->duration}",
+         "--paths-file={$input}",
+         "--workers={$clientWorkers}",
+      ];
+      if ($this->pipeline > 1) {
+         $command[] = "--pipeline={$this->pipeline}";
       }
 
-      file_put_contents($tmpFile, json_encode($loadData));
+      try {
+         $execution = $Artifacts->run($command, $this->duration + 30.0, 2.0);
+         $output = $execution['exit'] === 0
+            ? @file_get_contents($execution['stdout'])
+            : false;
 
-      // @ Run worker subprocess
-      $output = [];
-      $cmd = "php {$workerScript}"
-         . " --host=127.0.0.1"
-         . " --port={$this->port}"
-         . " --connections={$connections}"
-         . " --duration={$this->duration}"
-         . " --paths-file={$tmpFile}"
-         . " --workers={$clientWorkers}";
-      if ($this->pipeline > 1) $cmd .= " --pipeline={$this->pipeline}";
-      $cmd .= " 2>/dev/null";
-
-      exec($cmd, $output);
-
-      @unlink($tmpFile);
-
-      // @ Parse JSON output
-      $json = implode('', $output);
-
-      return $this->parse($json);
+         return $this->parse($output === false ? '' : $output);
+      }
+      finally {
+         $Artifacts->clean();
+      }
    }
 
    /**
@@ -597,16 +724,64 @@ return new class (
    }
    private function parse (string $output): Result
    {
-      /** @var array{rps?: float, latency?: string|null, transfer?: string|null}|null $data */
+      /** @var array<string,mixed>|null $data */
       $data = json_decode($output, true);
       if (!\is_array($data)) {
          return new Result();
       }
 
+      $statuses = \is_array($data['statuses'] ?? null) ? $data['statuses'] : [];
+      $failures = \is_array($data['failures'] ?? null) ? $data['failures'] : [];
+      $writeFailures = \is_array($data['write_failures'] ?? null) ? $data['write_failures'] : [];
+      $counters = [
+         'scheduled', 'sent', 'responses', 'informational', 'outstanding',
+         'failed', 'write_failed', 'connection_failed', 'partial_writes',
+      ];
+      $valid = true;
+
+      foreach ($counters as $counter) {
+         $valid = $valid && \is_int($data[$counter] ?? null) && $data[$counter] >= 0;
+      }
+      foreach ([$statuses, $failures, $writeFailures] as $counts) {
+         foreach ($counts as $count) {
+            $valid = $valid && \is_int($count) && $count >= 0;
+         }
+      }
+      $RPS = $data['rps'] ?? null;
+      $validRPS = (\is_int($RPS) || \is_float($RPS))
+         && \is_finite((float) $RPS)
+         && (float) $RPS >= 0;
+
+      $accounting = $valid
+         && $validRPS
+         && ($data['accounting'] ?? false) === true
+         && $data['connection_failed'] === 0
+         && $data['outstanding'] === 0
+         && $data['scheduled'] === $data['sent'] + $data['write_failed']
+         && $data['sent'] === $data['responses'] + $data['failed']
+         && $data['failed'] === \array_sum($failures)
+         && $data['write_failed'] === \array_sum($writeFailures)
+         && $data['responses'] === \array_sum($statuses);
+
       return new Result(
-         rps: isset($data['rps']) ? (float) $data['rps'] : null,
+         // ! Throughput is reportable only after the worker proves both
+         //   request/response accounting equations.
+         rps: $accounting ? (float) $RPS : null,
          latency: isset($data['latency']) ? (string) $data['latency'] : null,
          transfer: isset($data['transfer']) ? (string) $data['transfer'] : null,
+         scheduled: isset($data['scheduled']) ? (int) $data['scheduled'] : null,
+         sent: isset($data['sent']) ? (int) $data['sent'] : null,
+         responses: isset($data['responses']) ? (int) $data['responses'] : null,
+         informational: isset($data['informational']) ? (int) $data['informational'] : null,
+         outstanding: isset($data['outstanding']) ? (int) $data['outstanding'] : null,
+         failed: isset($data['failed']) ? (int) $data['failed'] : null,
+         writeFailed: isset($data['write_failed']) ? (int) $data['write_failed'] : null,
+         connectionFailed: isset($data['connection_failed']) ? (int) $data['connection_failed'] : null,
+         partialWrites: isset($data['partial_writes']) ? (int) $data['partial_writes'] : null,
+         accounting: $accounting,
+         statuses: $statuses,
+         failures: $failures,
+         writeFailures: $writeFailures,
       );
    }
 };

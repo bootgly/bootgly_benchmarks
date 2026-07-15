@@ -11,14 +11,18 @@
  *   php bootgly.php stop
  */
 
+use Bootgly\Benchmarks\Runners\ServerCapture;
+
+require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
+
 // @ BOOTGLY_DIR env overrides the default sibling checkout.
 $bootglyDir = getenv('BOOTGLY_DIR') ?: __DIR__ . '/../../../../bootgly';
 $port = getenv('BENCHMARK_PORT') ?: '8085';
 
 $action = $argv[1] ?? 'start';
 
-match ($action) {
-   'start' => (function () use ($bootglyDir, $port) {
+$exit = match ($action) {
+   'start' => (function () use ($bootglyDir, $port): int {
       // @ Stop any stale instance
       exec("php {$bootglyDir}/bootgly project Benchmark/WS_Server_CLI stop > /dev/null 2>&1");
       usleep(500_000);
@@ -48,12 +52,15 @@ match ($action) {
       $env .= "BENCH_WS_MODE={$wsMode} ";
 
       // @ Start server via bootgly project command
-      exec("{$env}php {$bootglyDir}/bootgly project Benchmark/WS_Server_CLI start > /dev/null 2>&1");
+      return ServerCapture::run("{$env}php {$bootglyDir}/bootgly project Benchmark/WS_Server_CLI start");
    })(),
 
-   'stop' => (function () use ($bootglyDir) {
+   'stop' => (function () use ($bootglyDir): int {
       exec("php {$bootglyDir}/bootgly project Benchmark/WS_Server_CLI stop > /dev/null 2>&1");
+      return 0;
    })(),
 
-   default => exit(1),
+   default => 1,
 };
+
+exit($exit);

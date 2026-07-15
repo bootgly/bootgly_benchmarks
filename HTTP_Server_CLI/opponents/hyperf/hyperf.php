@@ -24,6 +24,10 @@
  *   php hyperf.php stop
  */
 
+use Bootgly\Benchmarks\Runners\ServerCapture;
+
+require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
+
 $bootablesDir = realpath(__DIR__ . '/../../bootables/hyperf');
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
@@ -45,10 +49,10 @@ if (extension_loaded('swoole') === false || is_file("{$bootablesDir}/vendor/auto
 
 $action = $argv[1] ?? 'start';
 
-match ($action) {
+$exit = match ($action) {
    // @ Run the Hyperf server in the foreground (the runner backgrounds it). The bin
    //   script expects the namespaced `Swoole\` API, so force swoole.use_shortname=Off.
-   'start' => (function () use ($bootablesDir, $port, $workers) {
+   'start' => (function () use ($bootablesDir, $port, $workers): int {
       $db = sprintf(
          'DB_HOST=%s DB_PORT=%s DB_NAME=%s DB_USER=%s DB_PASS=%s ',
          escapeshellarg(getenv('DB_HOST') ?: '127.0.0.1'),
@@ -58,18 +62,21 @@ match ($action) {
          escapeshellarg(getenv('DB_PASS') ?: '')
       );
 
-      exec(
+      return ServerCapture::run(
          "cd {$bootablesDir} && {$db}SERVER_PORT={$port} SERVER_WORKER_NUM={$workers} "
-         . "php -d swoole.use_shortname=Off bin/hyperf.php start > /dev/null 2>&1"
+         . "php -d swoole.use_shortname=Off bin/hyperf.php start"
       );
    })(),
 
    // @ Kill the Hyperf master (which brings down its workers) by argv pattern, then
    //   free the port.
-   'stop' => (function () use ($port) {
+   'stop' => (function () use ($port): int {
       exec("pkill -9 -f 'bin/hyperf.php' > /dev/null 2>&1");
       exec("lsof -ti :{$port} 2>/dev/null | xargs -r kill -9 > /dev/null 2>&1");
+      return 0;
    })(),
 
-   default => exit(1),
+   default => 1,
 };
+
+exit($exit);

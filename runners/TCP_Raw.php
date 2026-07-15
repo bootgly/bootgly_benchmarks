@@ -15,6 +15,10 @@ use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
 use Bootgly\ACI\Tests\Benchmark\Configs\Load;
 use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
+use Bootgly\Benchmarks\Runners\RunArtifacts;
+use Bootgly\Benchmarks\Runners\RunProcess;
+
+require_once __DIR__ . '/RunArtifacts.php';
 
 
 return new class (
@@ -37,6 +41,9 @@ return new class (
    public int $warmupConnections = 64;
    // # server readiness
    public int $readyTimeout = 10;
+
+   private ?RunArtifacts $ServerArtifacts = null;
+   private ?RunProcess $ServerProcess = null;
 
 
    public function __construct (
@@ -62,6 +69,11 @@ return new class (
       if (isset($options['client-workers'])) {
          $this->workers = (int) $options['client-workers'];
       }
+
+      $this->workers = $this->resolveClientWorkers();
+      $this->meta['connections'] = $this->connections;
+      $this->meta['duration'] = $this->duration;
+      $this->meta['client-workers'] = $this->workers;
    }
    public function options (): array
    {
@@ -97,19 +109,17 @@ return new class (
     */
    public function banner (Configs $Configs): array
    {
-      $sections = [];
-
-      $defaultWorkers = max(1, (int) ((int)(exec('nproc 2>/dev/null') ?: 1) / 2));
-      $workersDisplay = (string) ($this->opponents[0]->workers ?? $defaultWorkers);
-
-      $clientFlags = "-c{$this->connections} -d{$this->duration}s";
-      $clientFlags .= ' -w' . $this->resolveClientWorkers();
-
-      $sections['Configuration'] = [
-         'Client'  => "Bootgly TCP_Client_CLI {$clientFlags}",
-         'Warmup'  => "-c{$this->warmupConnections} -d{$this->warmupDuration}s",
-         'Port'    => (string) $this->port,
-         'Workers' => $workersDisplay,
+      $sections = [
+         'Client' => [
+            'Engine'         => 'Bootgly TCP_Client_CLI',
+            'Client workers' => (string) $this->resolveClientWorkers(),
+            'Connections'    => (string) $this->connections,
+            'Duration'       => "{$this->duration} s",
+            'Warmup'         => "{$this->warmupConnections} connections · {$this->warmupDuration} s",
+         ],
+         'Server' => [
+            'Port' => (string) $this->port,
+         ],
       ];
 
       return $sections;
@@ -129,10 +139,19 @@ return new class (
 
       // @ Install SIGINT handler to stop server on CTRL+C
       $activeOpponent = null;
+      $stopping = false;
+      $interrupted = false;
       pcntl_async_signals(true);
-      pcntl_signal(SIGINT, function () use (&$activeOpponent) {
+      pcntl_signal(SIGINT, function () use (&$activeOpponent, &$stopping, &$interrupted) {
+         if ($stopping) {
+            $interrupted = true;
+            return;
+         }
          if ($activeOpponent !== null) {
-            $this->stopServer($activeOpponent);
+            $Opponent = $activeOpponent;
+            $activeOpponent = null;
+            $stopping = true;
+            $this->stopServer($Opponent);
          }
          exit(130);
       });
@@ -153,6 +172,8 @@ return new class (
             continue;
          }
 
+         putenv('BENCHMARK_PROFILE_SCOPE=' . Configs::slug($Opponent->name));
+
          // ! Server worker count — set by Runner::apply (or auto: nproc / 2)
          $workers = $Opponent->workers
             ?? max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
@@ -162,13 +183,22 @@ return new class (
 
          // @ Start server
          $activeOpponent = $Opponent;
+         $stopping = false;
+
+         try {
          echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
          $this->startServer($Opponent, $workers);
 
          // @ Wait for server readiness
          if ( !$this->waitForServer() ) {
             echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n\n";
+            $stopping = true;
             $this->stopServer($Opponent);
+            $activeOpponent = null;
+            $stopping = false;
+            if ($interrupted) {
+               exit(130);
+            }
             continue;
          }
 
@@ -225,11 +255,37 @@ return new class (
          echo "\n";
 
          // @ Stop server
+         $stopping = true;
          $this->stopServer($Opponent);
          $activeOpponent = null;
+         $stopping = false;
+         if ($interrupted) {
+            exit(130);
+         }
 
          $results[$Opponent->name] = $loadResults;
+         }
+         catch (Throwable $Throwable) {
+            if (!$stopping && $activeOpponent !== null) {
+               $CleanupOpponent = $activeOpponent;
+               $activeOpponent = null;
+               $stopping = true;
+
+               try {
+                  $this->stopServer($CleanupOpponent);
+               }
+               catch (Throwable) {
+                  // @ Preserve the original benchmark failure.
+               }
+            }
+
+            $activeOpponent = null;
+            putenv('BENCHMARK_PROFILE_SCOPE');
+            throw $Throwable;
+         }
       }
+
+      putenv('BENCHMARK_PROFILE_SCOPE');
 
       return $results;
    }
@@ -244,15 +300,38 @@ return new class (
    {
       $script = $Opponent->script;
       putenv("BOOTGLY_WORKERS={$workers}");
-      exec("BOOTGLY_WORKERS={$workers} php {$script} start > /dev/null 2>&1 &");
+      $this->ServerArtifacts?->clean();
+      $this->ServerArtifacts = RunArtifacts::create('tcp-raw-server');
+      $this->ServerProcess = $this->ServerArtifacts->start(
+         [PHP_BINARY, $script, 'start'],
+         [
+            'BENCHMARK_SERVER_DIR' => $this->ServerArtifacts->directory,
+            'BOOTGLY_WORKERS' => (string) $workers,
+         ]
+      );
    }
    private function stopServer (Opponent $Opponent): void
    {
       $script = $Opponent->script;
-      exec("php {$script} stop > /dev/null 2>&1");
+      $Artifacts = RunArtifacts::create('tcp-raw-server-stop');
 
-      sleep(1);
-      $this->killPort();
+      try {
+         $Artifacts->start([PHP_BINARY, $script, 'stop'])->wait(10.0, 2.0);
+      }
+      finally {
+         $Artifacts->clean();
+         sleep(1);
+         $this->killPort();
+
+         try {
+            $this->ServerProcess?->wait(10.0, 2.0);
+         }
+         finally {
+            $this->ServerProcess = null;
+            $this->ServerArtifacts?->clean();
+            $this->ServerArtifacts = null;
+         }
+      }
    }
    private function waitForServer (): bool
    {
@@ -269,6 +348,10 @@ return new class (
          usleep(250_000);
       }
 
+      if ($this->ServerProcess !== null && !$this->ServerProcess->check()) {
+         $this->ServerProcess->wait();
+      }
+
       return false;
    }
 
@@ -276,28 +359,28 @@ return new class (
    private function warmup (): void
    {
       $workerScript = __DIR__ . '/TCP_Raw/worker.php';
-
-      // @ Warmup with a simple echo message
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_warmup_');
-      if ($tmpFile === false) return;
-
-      file_put_contents($tmpFile, json_encode([
+      $Artifacts = RunArtifacts::create('tcp-raw-warmup');
+      $JSON = json_encode([
          'message'   => "PING\n",
          'delimiter' => "\n",
-      ]));
+      ], JSON_THROW_ON_ERROR);
+      $input = $Artifacts->write('input.json', $JSON);
 
-      exec(
-         "php {$workerScript}"
-         . " --host=127.0.0.1"
-         . " --port={$this->port}"
-         . " --connections={$this->warmupConnections}"
-         . " --duration={$this->warmupDuration}"
-         . " --load-file={$tmpFile}"
-         . " --workers={$this->resolveClientWorkers()}"
-         . " > /dev/null 2>&1"
-      );
-
-      @unlink($tmpFile);
+      try {
+         $Artifacts->run([
+            PHP_BINARY,
+            $workerScript,
+            '--host=127.0.0.1',
+            "--port={$this->port}",
+            "--connections={$this->warmupConnections}",
+            "--duration={$this->warmupDuration}",
+            "--load-file={$input}",
+            '--workers=' . $this->resolveClientWorkers(),
+         ], $this->warmupDuration + 30.0, 2.0);
+      }
+      finally {
+         $Artifacts->clean();
+      }
    }
 
    private function command (Load $Load, int $connections = 0, int $clientWorkers = 0): Result
@@ -309,33 +392,30 @@ return new class (
       // @ Load load data from PHP file
       $loadData = include $Load->file;
 
-      // @ Write load to temp file
-      $tmpFile = tempnam(sys_get_temp_dir(), 'bench_load_');
-      if ($tmpFile === false) {
-         return new Result();
+      $Artifacts = RunArtifacts::create('tcp-raw-load');
+      $JSON = json_encode($loadData, JSON_THROW_ON_ERROR);
+      $input = $Artifacts->write('input.json', $JSON);
+
+      try {
+         $execution = $Artifacts->run([
+            PHP_BINARY,
+            $workerScript,
+            '--host=127.0.0.1',
+            "--port={$this->port}",
+            "--connections={$connections}",
+            "--duration={$this->duration}",
+            "--load-file={$input}",
+            "--workers={$clientWorkers}",
+         ], $this->duration + 30.0, 2.0);
+         $output = $execution['exit'] === 0
+            ? @file_get_contents($execution['stdout'])
+            : false;
+
+         return $this->parse($output === false ? '' : $output);
       }
-
-      file_put_contents($tmpFile, json_encode($loadData));
-
-      // @ Run worker subprocess
-      $output = [];
-      $cmd = "php {$workerScript}"
-         . " --host=127.0.0.1"
-         . " --port={$this->port}"
-         . " --connections={$connections}"
-         . " --duration={$this->duration}"
-         . " --load-file={$tmpFile}"
-         . " --workers={$clientWorkers}"
-         . " 2>/dev/null";
-
-      exec($cmd, $output);
-
-      @unlink($tmpFile);
-
-      // @ Parse JSON output
-      $json = implode('', $output);
-
-      return $this->parse($json);
+      finally {
+         $Artifacts->clean();
+      }
    }
 
    private function parse (string $output): Result

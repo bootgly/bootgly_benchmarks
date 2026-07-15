@@ -12,6 +12,9 @@ use Bootgly\ACI\Tests\Benchmark\Opponent;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\ACI\Tests\Benchmark\Runner;
+use Bootgly\Benchmarks\Runners\RunArtifacts;
+
+require_once __DIR__ . '/RunArtifacts.php';
 
 
 return new class extends Runner
@@ -36,15 +39,39 @@ return new class extends Runner
 
    public function configure (array $options): void
    {
+      $Parse = static function (mixed $value, string $name, int $minimum): int {
+         if (is_bool($value)) {
+            throw new InvalidArgumentException(
+               "Code benchmark {$name} requires an explicit integer value."
+            );
+         }
+         $parsed = filter_var(
+            $value,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => $minimum]],
+         );
+         if ($parsed === false) {
+            throw new InvalidArgumentException(
+               "Code benchmark {$name} must be an integer greater than or equal to {$minimum}."
+            );
+         }
+
+         return $parsed;
+      };
+
       if (isset($options['iterations'])) {
-         $this->iterations = (int) $options['iterations'];
+         $this->iterations = $Parse($options['iterations'], 'iterations', 1);
       }
       if (isset($options['timeout'])) {
-         $this->timeout = (int) $options['timeout'];
+         $this->timeout = $Parse($options['timeout'], 'timeout', 1);
       }
       if (isset($options['warmup'])) {
-         $this->warmup = (int) $options['warmup'];
+         $this->warmup = $Parse($options['warmup'], 'warmup', 0);
       }
+
+      $this->meta['iterations'] = $this->iterations;
+      $this->meta['timeout'] = $this->timeout;
+      $this->meta['warmup'] = $this->warmup;
    }
    public function options (): array
    {
@@ -57,6 +84,14 @@ return new class extends Runner
 
    public function run (Configs $Configs): array
    {
+      // ! Visual Code benchmarks intentionally inherit caller stdio in text
+      //   mode. JSON mode isolates child channels in regular files so stdout
+      //   remains one document. Record the different execution environment so
+      //   marks from the two modes are not mistaken for equivalent samples.
+      $this->meta['execution-stdio'] = $Configs->format === 'json'
+         ? 'isolated-files+closed-stdin'
+         : 'inherited-descriptors+isolated-process-group';
+
       $results = [];
 
       foreach ($this->opponents as $Opponent) {
@@ -64,6 +99,8 @@ return new class extends Runner
          if ($Configs->opponents !== null && !in_array(Configs::slug($Opponent->name), array_map(Configs::slug(...), $Configs->opponents))) {
             continue;
          }
+
+         putenv('BENCHMARK_PROFILE_SCOPE=' . Configs::slug($Opponent->name));
 
          // @ Identify opponent
          echo "\n  ▶ {$Opponent->name}\n\n";
@@ -101,6 +138,8 @@ return new class extends Runner
          $results[$Opponent->name] = $bestByLabel;
       }
 
+      putenv('BENCHMARK_PROFILE_SCOPE');
+
       return $results;
    }
 
@@ -111,33 +150,92 @@ return new class extends Runner
    private function execute (Opponent $Opponent): null|array
    {
       // @ Prepare result file (opponent writes JSON here instead of stdout)
-      $resultFile = sys_get_temp_dir() . '/bootgly_bench_' . getmypid() . '_' . uniqid() . '.json';
+      $resultRelative = 'results/code/'
+         . Configs::slug($Opponent->name) . '-'
+         . bin2hex(random_bytes(12)) . '.json';
+      $resultFile = $this->Artifacts !== null
+         ? $this->Artifacts->resolve($resultRelative)
+         : sys_get_temp_dir() . '/bootgly_bench_' . getmypid() . '_' . bin2hex(random_bytes(12)) . '.json';
       putenv("BENCHMARK_RESULT_FILE=$resultFile");
 
-      // @ Inherit real terminal STDIO (allows visual rendering + stty/cursor)
-      $descriptors = [
-         0 => STDIN,
-         1 => STDOUT,
-         2 => STDERR,
-      ];
-
-      $process = proc_open(
-         command: ['php', $Opponent->script],
-         descriptor_spec: $descriptors,
-         pipes: $pipes,
-      );
-
-      if ($process === false) {
-         putenv('BENCHMARK_RESULT_FILE');
-         return null;
+      if (getenv('BENCHMARK_FORMAT') === 'json' && $this->Artifacts !== null) {
+         // # Machine mode keeps every child byte outside the harness channels.
+         $child = $this->spawn(
+            [PHP_BINARY, $Opponent->script],
+            'code-' . Configs::slug($Opponent->name),
+            timeout: (float) $this->timeout,
+         );
+         $exitCode = $child['exit'];
       }
+      else {
+         // @ Text mode preserves caller descriptors because visual benchmarks
+         //   may intentionally exercise cursor/stty rendering behavior.
+         $descriptors = [
+            0 => STDIN,
+            1 => STDOUT,
+            2 => STDERR,
+         ];
+         $groupReady = $resultFile . '.group-ready';
+         $environment = getenv();
+         $environment = is_array($environment) ? $environment : [];
+         $environment['BOOTGLY_PROCESS_GROUP_READY'] = $groupReady;
 
-      $exitCode = proc_close($process);
+         $process = proc_open(
+            command: RunArtifacts::isolate([PHP_BINARY, $Opponent->script]),
+            descriptor_spec: $descriptors,
+            pipes: $pipes,
+            env_vars: $environment,
+            options: ['bypass_shell' => true],
+         );
+
+         if ($process === false) {
+            putenv('BENCHMARK_RESULT_FILE');
+            return null;
+         }
+
+         $status = proc_get_status($process);
+         $PID = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : null;
+         $groupDeadline = microtime(true) + 2.0;
+         $groupStarted = false;
+
+         do {
+            if (
+               $PID !== null
+               && is_file($groupReady)
+               && trim((string) @file_get_contents($groupReady)) === (string) $PID
+            ) {
+               $groupStarted = true;
+               break;
+            }
+
+            $status = proc_get_status($process);
+            if (!is_array($status) || !$status['running']) {
+               break;
+            }
+
+            usleep(1_000);
+         } while (microtime(true) < $groupDeadline);
+
+         @unlink($groupReady . '.tmp');
+         @unlink($groupReady);
+
+         if (!$groupStarted || $PID === null) {
+            @proc_terminate($process, 9);
+            proc_close($process);
+            putenv('BENCHMARK_RESULT_FILE');
+
+            return null;
+         }
+
+         $exitCode = $this->wait($process, $PID);
+      }
 
       putenv('BENCHMARK_RESULT_FILE');
 
       if ($exitCode !== 0) {
-         @unlink($resultFile);
+         if ($this->Artifacts === null) {
+            @unlink($resultFile);
+         }
          return null;
       }
 
@@ -147,7 +245,9 @@ return new class extends Runner
       }
 
       $json = file_get_contents($resultFile);
-      @unlink($resultFile);
+      if ($this->Artifacts === null) {
+         @unlink($resultFile);
+      }
 
       $data = json_decode($json, true);
 
@@ -179,5 +279,83 @@ return new class extends Runner
       }
 
       return $Results;
+   }
+
+   /**
+    * Enforce the advertised timeout while preserving inherited text stdio.
+    *
+    * @param resource $Process
+    */
+   private function wait (mixed $Process, int $PGID): int
+   {
+      $deadline = microtime(true) + $this->timeout;
+      $observedExit = null;
+      $signal = null;
+      $timedOut = false;
+
+      $Poll = static function () use (&$Process, &$observedExit, &$signal, $PGID): bool {
+         if (is_resource($Process)) {
+            $status = proc_get_status($Process);
+            if (is_array($status) && !$status['running']) {
+               $observedExit = ($status['exitcode'] ?? -1) >= 0
+                  ? (int) $status['exitcode']
+                  : $observedExit;
+               $signal = ($status['signaled'] ?? false) && isset($status['termsig'])
+                  ? (int) $status['termsig']
+                  : $signal;
+               $closedExit = proc_close($Process);
+               $Process = null;
+               $observedExit ??= $closedExit >= 0 ? $closedExit : null;
+            }
+            else if (is_array($status) && $status['running']) {
+               return true;
+            }
+         }
+
+         return @posix_kill(-$PGID, 0);
+      };
+      $Signal = static function (int $number) use (&$Process, $PGID): void {
+         if (@posix_kill(-$PGID, $number)) {
+            return;
+         }
+         if (is_resource($Process)) {
+            @proc_terminate($Process, $number);
+         }
+      };
+
+      while ($Poll()) {
+         if (microtime(true) >= $deadline) {
+            $timedOut = true;
+            $Signal(15);
+            $termDeadline = microtime(true) + 2.0;
+            do {
+               usleep(10_000);
+               $running = $Poll();
+            } while ($running && microtime(true) < $termDeadline);
+
+            if ($running) {
+               $Signal(9);
+               $killDeadline = microtime(true) + 2.0;
+               do {
+                  usleep(10_000);
+                  $running = $Poll();
+               } while ($running && microtime(true) < $killDeadline);
+            }
+
+            if ($running) {
+               throw new RuntimeException(
+                  "Code benchmark process group {$PGID} survived TERM/KILL escalation"
+               );
+            }
+
+            break;
+         }
+
+         usleep(10_000);
+      }
+
+      return $timedOut
+         ? 124
+         : ($observedExit ?? ($signal !== null ? 128 + $signal : 255));
    }
 };

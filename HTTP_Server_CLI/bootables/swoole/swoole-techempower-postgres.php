@@ -290,6 +290,16 @@ final class SwooleDatabaseBenchmark
 
 $port = getenv('SERVER_PORT') ?: '8082';
 $workers = getenv('SERVER_WORKER_NUM') ?: (string) max(1, (int) (shell_exec('nproc 2>/dev/null') ?: 1) / 2);
+$serverDirectory = getenv('BENCHMARK_SERVER_DIR');
+$logFile = is_string($serverDirectory) && $serverDirectory !== ''
+   ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.log'
+   : '/dev/null';
+$PIDFile = getenv('SWOOLE_PID_FILE');
+$PIDFile = is_string($PIDFile) && $PIDFile !== ''
+   ? $PIDFile
+   : (is_string($serverDirectory) && $serverDirectory !== ''
+      ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.pid'
+      : null);
 
 // @ Reactor mode: SWOOLE_PROCESS by default (master + per-worker PDO pool). The
 //   Swoole opponent runs this TechEmpower route set in SWOOLE_BASE via
@@ -297,17 +307,21 @@ $workers = getenv('SERVER_WORKER_NUM') ?: (string) max(1, (int) (shell_exec('npr
 $mode = getenv('SWOOLE_SERVER_MODE') === 'base' ? SWOOLE_BASE : SWOOLE_PROCESS;
 
 $Server = new Server('0.0.0.0', is_numeric($port) ? (int) $port : 8082, $mode);
-$Server->set([
+$settings = [
    'worker_num' => is_numeric($workers) ? max(1, (int) $workers) : 1,
-   'daemonize' => true,
-   'log_file' => '/dev/null',
+   'daemonize' => false,
+   'log_file' => $logFile,
    'log_level' => SWOOLE_LOG_ERROR,
    'enable_coroutine' => true,
    'enable_reuse_port' => true,
    'hook_flags' => SWOOLE_HOOK_ALL,
    'http_compression' => false,
    'open_tcp_nodelay' => true,
-]);
+];
+if ($PIDFile !== null) {
+   $settings['pid_file'] = $PIDFile;
+}
+$Server->set($settings);
 
 $Server->on('workerStart', static function (): void {
    SwooleDatabaseBenchmark::init();

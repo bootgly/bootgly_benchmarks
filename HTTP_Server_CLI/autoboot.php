@@ -5,6 +5,13 @@
  * --------------------------------------------------------------------------
  */
 
+use Bootgly\ACI\Tests\Benchmark\Configs;
+use Bootgly\ACI\Tests\Benchmark\Runner;
+use Bootgly\Benchmarks\HTTP_Server_CLI\DatabaseParity;
+
+
+require_once __DIR__ . '/DatabaseParity.php';
+
 // @ Select runner based on environment variable
 $runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'tcp_client');
 
@@ -16,6 +23,7 @@ $runnerFile = match ($runnerType) {
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
 // @ Load set — provided by the framework from `--loads=<set>:<indexes>` (BENCHMARK_LOAD_SET).
 $loadSet = strtolower((string) getenv('BENCHMARK_LOAD_SET'));
+$poolMax = DatabaseParity::normalize($loadSet);
 
 // ? Explicit set required — this case ships two sets, no silent default.
 //   Skipped under --help (BENCHMARK_HELP), which only needs the Runner options.
@@ -83,5 +91,20 @@ $Runner->load(__DIR__ . $loadDir);
 foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
    require $opponentFile;
 }
+
+// ! Resolve and prove the effective DB ceiling only after TestCommand knows
+//   the concrete opponent/load selection, but before it publishes the resolved
+//   manifest config, renders the banner, or starts a measured process.
+$Runner->Validator = static function (Runner $Runner, Configs $Configs) use ($poolMax): void {
+   $effective = DatabaseParity::validate($Configs, $Runner->opponents, $poolMax);
+   if ($effective === null) {
+      return;
+   }
+
+   $Runner->meta['db-pool-max'] = $effective;
+   if (DatabaseParity::check($Configs)) {
+      $Runner->meta['db-pool-comparability'] = DatabaseParity::CONTRACT;
+   }
+};
 
 return $Runner;

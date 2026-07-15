@@ -12,6 +12,10 @@ use Swoole\Constant;
 
 $workers = (int) (getenv('SERVER_WORKER_NUM') ?: ((int) (shell_exec('nproc') / 2) ?: 1));
 $port    = (int) (getenv('SERVER_PORT') ?: 8082);
+$serverDirectory = getenv('BENCHMARK_SERVER_DIR');
+$logFile = is_string($serverDirectory) && $serverDirectory !== ''
+   ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/hyperf.swoole.log'
+   : '/dev/null';
 
 return [
    'mode'    => SWOOLE_BASE,
@@ -32,7 +36,7 @@ return [
    'settings' => [
       Constant::OPTION_WORKER_NUM       => $workers,
       Constant::OPTION_DAEMONIZE        => (bool) (getenv('SERVER_DAEMONIZE') ?: false),
-      Constant::OPTION_LOG_FILE         => '/dev/null',
+      Constant::OPTION_LOG_FILE         => $logFile,
       Constant::OPTION_LOG_LEVEL        => SWOOLE_LOG_ERROR,
       Constant::OPTION_OPEN_TCP_NODELAY => true,
       // Parity with the standalone Swoole (base) opponent: each worker accepts

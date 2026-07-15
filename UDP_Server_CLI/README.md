@@ -103,15 +103,19 @@ execution **round** in the same process, producing one `.bench.marks` per round.
 
 ```bash
 # server-workers sweep in one command (native SVG charts included):
-./bootgly test benchmark UDP_Server_CLI --loads=default:* --server-workers=1..24:4 --results=charts
+./bootgly test benchmark UDP_Server_CLI --opponents=bootgly \
+   --loads=default:* --server-workers=1..24:4 --results=charts
 ```
 
 Three global options control the output: `--output=full|compact` (style; auto —
-compact when sweeping), `--format=text|json` (json = prints only the
-machine-readable JSON document, human output suppressed) and `--results=marks|report|charts` (artifact levels —
-report adds a `RESULTS-*.md`, charts adds native SVGs). Reports/charts land in
-`bootgly/storage/tests/benchmarks/UDP_Server_CLI/results/`; the run always ends with an
-**Artifacts** footer pointing at every generated file.
+compact when sweeping), `--format=text|json` (`json` is supervised and emits
+exactly one public document on normal/handled completion; external termination
+or crash is excluded), and
+`--results=marks|report|charts` (artifact levels — report adds a `RESULTS-*.md`,
+charts adds native SVGs). Every invocation owns
+`bootgly/storage/tests/benchmarks/UDP_Server_CLI/runs/<run-id>/`; marks,
+reports, logs, child channels/statuses, the manifest, and the optional JSON
+result stay below that directory. Text output ends with an **Artifacts** block.
 
 ### Contextual Help
 
@@ -131,13 +135,14 @@ All commands run from the **bootgly** directory.
 
 ```bash
 # All loads, the Bootgly baseline (single set: default)
-./bootgly test benchmark UDP_Server_CLI --loads=default:*
+./bootgly test benchmark UDP_Server_CLI --opponents=bootgly --loads=default:*
 
 # Specific load
-./bootgly test benchmark UDP_Server_CLI --loads=default:1
+./bootgly test benchmark UDP_Server_CLI --opponents=bootgly --loads=default:1
 
 # Custom runner options
-./bootgly test benchmark UDP_Server_CLI --loads=default:* --connections=256 --duration=15 --server-workers=8
+./bootgly test benchmark UDP_Server_CLI --opponents=bootgly --loads=default:* \
+   --connections=256 --duration=15 --server-workers=8
 ```
 
 ### Global options
@@ -148,8 +153,8 @@ All commands run from the **bootgly** directory.
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`default:*` for all, `default:1,2` to filter) |
 | `--server-workers=N|A..B|A..B:S|N,N` | Server workers — sweep values run one round each (see [Configuration](#-configuration)) |
 | `--output=full|compact` | Output style (default: auto — compact when sweeping) |
-| `--format=text|json` | Results serialization (json = prints only the JSON document) |
-| `--results=marks|report|charts` | Generated artifacts (report/charts land in `storage/tests/benchmarks/<case>/results/`) |
+| `--format=text|json` | Results serialization (`json` emits one public document on normal/handled completion) |
+| `--results=marks|report|charts` | Generated artifacts (report/charts land in the invocation's `runs/<run-id>/reports/`) |
 
 ---
 
@@ -157,6 +162,10 @@ All commands run from the **bootgly** directory.
 
 - **CPU balance**: both the load generator and the server share CPU. The default uses `nproc / 2` workers to leave cores for the load generator.
 - **Port**: default **8084** (distinct from `HTTP_Server_CLI`:8082 and `TCP_Server_CLI`:8083 to allow parallel runs).
+- **Concurrent runs**: artifact directories cannot overwrite each other, but
+  runtime resources are not isolated. The case uses a fixed port and cleanup
+  can terminate a process already bound there. Run service-backed benchmarks
+  serially; overlapping cases also contend for host resources.
 - **Localhost loopback**: all tests run on `127.0.0.1` — network latency is not a factor.
 - **UDP semantics**: datagrams are connectionless; loss is possible under saturation. Throughput counts echoed replies only.
 - **Result variance**: results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
@@ -177,8 +186,12 @@ Single opponent — one table, one row per load:
 Each run saves a plain-text `.bench.marks` file (easy to diff or archive):
 
 ```
-bootgly/storage/tests/benchmarks/UDP_Server_CLI/<timestamp>_bench.marks
+bootgly/storage/tests/benchmarks/UDP_Server_CLI/runs/<run-id>/marks/result_bench.marks
 ```
+
+Run workspaces are retained until explicitly removed; automatic pruning is not
+implemented. Archive or remove complete inactive `runs/<run-id>` directories
+rather than individual artifacts.
 
 Reports are auto-generated from a range of `.bench.marks` files by
 `bootgly_benchmarks/scripts/chart.py` into this case's `results/` folder. See

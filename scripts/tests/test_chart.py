@@ -48,6 +48,81 @@ class AxisTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_db_pool_claim_requires_capability_contract(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="bootgly-chart-") as directory:
+            root = Path(directory)
+            marks = [root / "one.bench.marks", root / "two.bench.marks"]
+            for path in marks:
+                path.write_text("")
+
+            parsed = [
+                {
+                    "config": {
+                        "server-workers": str(workers),
+                        "db-pool-max": "1",
+                    }
+                }
+                for workers in (1, 2)
+            ]
+            report = root / "unverified.md"
+
+            chart.write_report(
+                report,
+                "throughput.png",
+                "ratio.png",
+                "HTTP_Server_CLI",
+                "techempower",
+                "Unverified DB parity",
+                "server-workers",
+                [1.0, 2.0],
+                ["Database multiple queries"],
+                ["Bootgly", "Swoole"],
+                {
+                    "Database multiple queries": {
+                        "Bootgly": [100, 200],
+                        "Swoole": [90, 180],
+                    }
+                },
+                "Bootgly",
+                marks,
+                parsed,
+            )
+
+            markdown = report.read_text()
+            self.assertIn("effective parity is unverified", markdown)
+            self.assertIn("must not be interpreted as proof", markdown)
+            self.assertNotIn("Configured per-worker DB ceiling validated", markdown)
+
+            for document in parsed:
+                document["config"]["db-pool-comparability"] = "capability-validated-v1"
+            report = root / "validated.md"
+            chart.write_report(
+                report,
+                "throughput.png",
+                "ratio.png",
+                "HTTP_Server_CLI",
+                "techempower",
+                "Validated DB parity",
+                "server-workers",
+                [1.0, 2.0],
+                ["Database multiple queries"],
+                ["Bootgly", "Swoole"],
+                {
+                    "Database multiple queries": {
+                        "Bootgly": [100, 200],
+                        "Swoole": [90, 180],
+                    }
+                },
+                "Bootgly",
+                marks,
+                parsed,
+            )
+
+            markdown = report.read_text()
+            self.assertIn("Configured per-worker DB ceiling validated at `1`", markdown)
+            self.assertIn("does not claim that this many PostgreSQL sessions", markdown)
+            self.assertNotIn("effective parity is unverified", markdown)
+
     def test_shared_additive_provenance_is_rendered(self) -> None:
         with tempfile.TemporaryDirectory(prefix="bootgly-chart-") as directory:
             root = Path(directory)

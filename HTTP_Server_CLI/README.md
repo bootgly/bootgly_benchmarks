@@ -232,7 +232,8 @@ stays Bootgly-only.
 
 The cross-framework data comparison is the `techempower` set's four DB routes plus
 the cached-queries route (loads `3,4,5,6,7`). They are neutral across opponents and
-run against Bootgly and **Swoole**:
+run against every selected cross-framework opponent whose database-connection
+capability satisfies the harness parity contract:
 
 | Route | Purpose |
 |-------|---------|
@@ -290,12 +291,23 @@ pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 
 #### Fairness & caveats
 
-> **Pin `DB_POOL_MAX` for every opponent.** Bootgly defaults its connection pool to
-> `DEFAULT_POOL_MAX=8` per worker; the Swoole TechEmpower bootable defaults to **1**. When the
-> env is **set**, every opponent honors it exactly — verified: `DB_POOL_MAX=1` gives Bootgly
-> exactly **1 PostgreSQL connection per worker** (it is *not* forced to 8). So always pass the
-> **same** `DB_POOL_MAX` to all opponents; an unset-default-vs-unset-default run (8 vs 1) is not
-> like-for-like.
+> **Database pool parity is fail-closed.** For the `techempower` set, an omitted or
+> empty `DB_POOL_MAX` is materialized as `1` before any server process starts. The
+> effective value is recorded in result metadata and displayed in the banner. For
+> DB loads `3–7`, the harness accepts a run only after matching every selected
+> opponent to a source-inspected capability contract. Bootgly, Swoole, AMPHP,
+> ReactPHP, and Hyperf honor a configurable per-worker ceiling. Workerman,
+> RoadRunner, FrankenPHP, and Laravel Octane are fixed at one persistent database
+> connection per worker. Consequently, `DB_POOL_MAX=1` is the common comparable
+> setting; values greater than one are accepted only when every selected opponent
+> is pool-aware. Unknown or unclassified opponents are rejected for DB comparisons
+> until their behavior is inspected and registered.
+
+The contract validates the configured per-worker ceiling. It does not claim that
+the maximum number of PostgreSQL sessions was simultaneously open during a run.
+Legacy artifacts that record only `db-pool-max`, without
+`db-pool-comparability=capability-validated-v1`, therefore do not prove effective
+parity by themselves.
 
 > **`/updates` at very high worker counts is not yet characterized.** On a many-core host (e.g.
 > 48 server-workers / 96 threads) Bootgly's `/updates` can collapse to a few hundred req/s:
@@ -315,10 +327,9 @@ From WSL2 / Ryzen 9 3900X / PostgreSQL `max_connections=100`:
   default observed so far.
 - `--server-workers=28` + `--client-workers=5` favored peak ping/parameter
   throughput, while 24/4 left more CPU headroom for pool-heavy loads.
-- For Swoole comparison, `DB_POOL_MAX=1` is the strict single-connection-per-worker
-  control. `DB_POOL_MAX=3` is the recommended comparison setting; `DB_POOL_MAX=4`
-  uses 96 DB connections at 24 workers and leaves little PostgreSQL headroom while
-  producing similar results.
+- `DB_POOL_MAX=1` is the universal cross-opponent comparison setting. Values above
+  one are tuning experiments valid only when all selected opponents are among the
+  pool-aware implementations; the harness rejects fixed-one opponents in that case.
 - Older `126k..130k req/s` artifacts did not validate HTTP status/body; the current
   TCP_Client preflight rejects 404/500 before timed runs.
 - `--connections=512` is a lower-latency alternative with similar throughput.
@@ -339,6 +350,60 @@ supports multi-worker forking and HTTP pipelining.
 | `--connections=N` | `514` | Number of TCP connections |
 | `--duration=N` | `10` | Benchmark duration in seconds |
 | `--pipeline=N` | `1` | HTTP pipelining factor |
+
+### Exact HTTP response accounting
+
+The timed TCP_Client worker keeps one incremental HTTP/1 framing tracker per
+connection. It carries parser state across arbitrary reads, associates response
+semantics with the FIFO request method, and counts a response only after its
+final framing boundary is observed. The handled framing includes informational
+responses, HEAD/204/304, Content-Length, chunked bodies and trailers,
+close-delimited bodies, pipelined responses, malformed input, and truncated
+input. Body bytes are discarded after framing; marker text such as `HTTP/1.`
+inside a body is not a response.
+
+Pipeline 1 has a correctness-preserving fast path for the common fixed-length
+response. The first response on a connection still passes through the strict
+parser. A later atomic read is accepted by the fast path only when its complete
+head is byte-identical to that validated head, its request method matches, and
+its total frame length is exact. Every other shape enters the incremental path:
+a changed head or method reaches the strict parser untouched, while matching
+fragmented or pipelined cached frames may use only the already-validated cached-
+head framing path. Chunked framing remains generic. Complete synchronous request
+writes use scalar accounting; partial writes retain the exact byte-boundary
+ledger and unsent suffix. Cached status counts are merged when the validated
+head changes or results are inspected. In the retained idle comparison, these
+changes reduced the initial observed strict-accounting regression to a 2.79%
+mean residual without returning to status-token counting; that session result
+is not a universal overhead bound.
+
+Every saved timed result exposes `scheduled`, `sent`, `responses`,
+`informational`, `outstanding`, `failed`, `write_failed`, `connection_failed`,
+`partial_writes`, per-status totals, response-failure totals, write-failure
+totals, and `accounting`. A valid terminal result must satisfy all of these
+conditions:
+
+```text
+scheduled = sent + sum(write_failures)
+sent = responses + sum(failures)
+outstanding = 0
+responses = sum(statuses)
+connection_failed = 0
+```
+
+The parent accepts only the files assigned to the child PIDs it actually
+spawned and revalidates each child before aggregation. Missing, malformed,
+non-finite, nonzero-exit, or internally inconsistent child output makes the
+result `accounting=invalid`; throughput is then emitted as `null`/`N/A` rather
+than inferred from partial data. `measurement_ended` is the explicit terminal
+classification for fully sent requests still in flight when the duration timer
+closes the window; it is not by itself evidence of a server fault.
+
+`partial_writes` counts observed reconciliations that leave a queued suffix; it
+is not a count of every underlying `fwrite()` syscall. The current latency value
+is still the older per-socket/burst approximation. It must not be interpreted as
+per-logical-request latency under pipelining; monotonic request timestamps and
+mergeable percentiles remain separate harness work.
 
 ---
 
@@ -493,6 +558,9 @@ server SAPI from `<set>` automatically — no env needed.
 
 PostgreSQL loads also read `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`,
 `DB_SSLMODE`, and `DB_POOL_MAX` (see [Database Benchmark](#database-benchmark)).
+For `techempower`, the harness defaults a missing/empty `DB_POOL_MAX` to `1`, records
+the effective value, and validates it against the selected opponents before starting
+any measured process.
 
 ### Sweeps
 
@@ -537,14 +605,37 @@ Three global options control what a run prints and generates:
 | Option | Values | Effect |
 |--------|--------|--------|
 | `--output` | `full` \| `compact` (default: auto) | Output style. `compact` prints the banner/system/opponents blocks once and a short header per round — the automatic choice when sweeping. |
-| `--format` | `text` \| `json` (default: `text`) | Results serialization. After pre-run validation succeeds, `json` prints **only** a single machine-readable JSON document (all rounds, per-round `.marks` paths, artifact paths), so successful output pipes straight into `jq`. Pre-run validation errors still use human-readable alerts pending the output-isolation P0. |
-| `--results` | `marks` \| `report` \| `charts` (default: `marks`) | Generated artifacts (inclusive levels). `report` also writes a `RESULTS-<set>-<ts>.md`; `charts` adds native SVG charts (throughput / ratio / latency) — no Python required. |
+| `--format` | `text` \| `json` (default: `text`) | Results serialization. `json` is supervised and writes exactly one machine-readable document to public stdout on normal or otherwise handled success/failure; child stdout/stderr remains in the run workspace, so that completed stream pipes directly into `jq`. External termination/crash is not covered by this guarantee. |
+| `--results` | `marks` \| `report` \| `charts` (default: `marks`) | Generated artifacts (inclusive levels). `report` also writes a `RESULTS-<load-set>-<run-token>.md`; `charts` adds native SVG charts (throughput / ratio / latency) — no Python required. |
 
-Reports and charts are written to
-`bootgly/storage/tests/benchmarks/<case>/results/`. In both output styles the
-run ends with an **Artifacts** footer pointing at every `.bench.marks` file and
-generated report/chart; in `--format=json` the same paths are embedded in the
-JSON document (`rounds[].marks` + `artifacts`).
+Every invocation exclusively claims a collision-resistant workspace:
+
+```text
+bootgly/storage/tests/benchmarks/<case>/runs/<run-id>/
+├── manifest.json
+├── result.json                 # --format=json
+├── marks/
+├── reports/                    # --results=report|charts
+├── logs/                       # supervised harness channels
+└── runners/                    # when the runner starts child processes
+```
+
+Harness-owned terminal files and completed stdout/stderr pairs are staged and
+atomically published inside that workspace. Framework-specific logs written
+while a server is live become stable after its tracked join and are then hashed.
+Readiness requires an HTTP application response rather than an open TCP port.
+For the official Swoole opponent, the foreground wrapper must also remain alive
+and the run-local `swoole.pid` must identify the same non-zombie process (PID,
+Linux `/proc` start time, and expected bootable) before and after the HTTP probe.
+Consequently, a listener left on the shared port cannot be attributed to a new
+Swoole invocation that failed to bind.
+In text mode the final **Artifacts** block identifies
+the run, path base, marks, manifest and any report/chart; in JSON mode the same
+identity and paths are embedded in the document (`run`, `rounds[].marks`, and
+`artifacts`). Raw run directories are retained until explicitly removed; the
+harness does not currently implement automatic retention or pruning. Archive
+or remove complete inactive `runs/<run-id>` directories rather than individual
+artifacts.
 
 ### Contextual Help
 
@@ -606,24 +697,27 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 ./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=benchmark:1,8
 
 # Run only the 100-route loads (3 and 6)
-./bootgly test benchmark HTTP_Server_CLI --loads=benchmark:3,6
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=benchmark:3,6
 ```
 
 ### Runner options - TCP_Client
 
 ```bash
 # Custom connections and duration
-./bootgly test benchmark HTTP_Server_CLI --connections=256 --duration=15
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly \
+   --loads=benchmark:1 --connections=256 --duration=15
 
 # With pipelining and explicit client workers
-./bootgly test benchmark HTTP_Server_CLI --pipeline=4 --client-workers=8
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly \
+   --loads=benchmark:1 --pipeline=4 --client-workers=8
 ```
 
 ### Case-specific options
 
 ```bash
 # Set server workers explicitly
-./bootgly test benchmark HTTP_Server_CLI --server-workers=4
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly \
+   --loads=benchmark:1 --server-workers=4
 ```
 
 ### Global options
@@ -634,7 +728,7 @@ opponent. The DB routes need PostgreSQL — export `DB_*` (see
 | `--loads=<set>:<indices>` | **Required.** Load set + 1-based indices (`<set>:*` for all, `<set>:1,2` to filter) |
 | `--server-workers=N\|A..B\|A..B:S\|N,N` | Server workers — sweep values run one round each (see [Sweeps](#sweeps)) |
 | `--output=full\|compact` | Output style (default: auto — compact when sweeping) |
-| `--format=text\|json` | Results serialization (after successful pre-run validation, json prints only the JSON document) |
+| `--format=text\|json` | Results serialization (`json` emits one public document on normal/handled completion; external termination is excluded) |
 | `--results=marks\|report\|charts` | Generated artifacts (see [Output, format and results](#output-format-and-results)) |
 
 ---
@@ -759,18 +853,18 @@ valid only when both fingerprints equal the standard empty SHA-256 digest; an
 index-only staged delta can validly produce `true` with both fingerprints empty:
 
 ```
-bootgly/storage/tests/benchmarks/HTTP_Server_CLI/<timestamp>_bench.marks
+bootgly/storage/tests/benchmarks/HTTP_Server_CLI/runs/<run-id>/marks/result_bench.marks
 ```
 
 ### Reports
 
-Reports are **auto-generated** from a range of `.bench.marks` files by
-`bootgly_benchmarks/scripts/chart.py` into this case's `results/` folder:
+Native reports are generated from the invocation's collected round data into
+its run-local `reports/` folder:
 
 ```
-results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.md
-results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.throughput.png
-results/RESULTS-<load-set>-<YYYY-MM-DD_HHMMSS>.chart.ratio.png
+runs/<run-id>/reports/RESULTS-<load-set>-<run-token>.md
+runs/<run-id>/reports/RESULTS-<load-set>-<run-token>.chart.throughput.svg
+runs/<run-id>/reports/RESULTS-<load-set>-<run-token>.chart.ratio.svg
 ```
 
 Each report carries an environment block (auto-detected OS, CPU, PHP, Swoole), a
@@ -837,9 +931,11 @@ php bootgly test benchmark HTTP_Server_CLI \
    --results=charts
 ```
 
-Everything lands in `bootgly/storage/tests/benchmarks/HTTP_Server_CLI/` — one
-`.bench.marks` per round plus `results/RESULTS-<set>-<ts>.md` and the
-throughput/ratio/latency SVGs.
+Everything lands below one exclusive
+`bootgly/storage/tests/benchmarks/HTTP_Server_CLI/runs/<run-id>/` workspace:
+one file in `marks/` per round, optional reports/charts in `reports/`, optional
+process channels and statuses in `runners/`, supervised harness logs and
+`result.json` in JSON mode, and `manifest.json`.
 
 The same sweep runs **fully inside Docker** — mount a host directory to keep
 the artifacts:
@@ -868,17 +964,23 @@ Then point `--marks` at a glob covering **every** `.marks` file from the sweep:
 ```bash
 cd bootgly_benchmarks/scripts
 .venv/bin/python3 chart.py \
-   --marks '../../bootgly/storage/tests/benchmarks/HTTP_Server_CLI/2026-06-04_*_bench.marks' \
+   --marks '../../bootgly/storage/tests/benchmarks/HTTP_Server_CLI/runs/<run-id>/marks/*_bench.marks' \
    --out ../HTTP_Server_CLI/results/ \
    --baseline Bootgly
 ```
 
 #### Tips & gotchas
 
-- **The glob must match every file in the sweep.** A pattern like `2026-06-04_193*`
-  silently drops `19:34:xx` runs — prefer `2026-06-04_19*` or `2026-06-04_*`.
-  `chart.py` aborts with *"No config key varies"* when the glob resolves to a single
-  file (nothing to put on the X axis).
+- **Keep the glob inside one exact run directory.** It must match every marks
+  file in that sweep without pulling files from another invocation.
+  `chart.py` aborts with *"No config key varies"* when the glob resolves to a
+  single file (nothing to put on the X axis).
+- Artifact workspaces are safe from cross-invocation overwrites, but runtime
+  resources are not isolated. Service-backed cases use fixed ports and their
+  startup/cleanup can terminate a process already bound there; database loads
+  also seed/use the configured PostgreSQL database. Run service-backed
+  benchmarks serially. Even different cases should not overlap for comparable
+  measurements because they still contend for host resources.
 - **Subplots follow `--loads`.** The chart draws one subplot per load present in the
   marks, so the `--loads` you ran during the sweep decide which subplots appear.
 - **X axis is auto-detected** (the config key with the most distinct values). Force

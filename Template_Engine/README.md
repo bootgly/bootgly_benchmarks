@@ -111,13 +111,13 @@ All commands run from the **bootgly** directory.
 
 ```bash
 # All opponents, defaults
-./bootgly test benchmark Template_Engine
+./bootgly test benchmark Template_Engine --loads=default:* --opponents=bootgly,laravel
 
 # Both opponents, 3 iterations (best kept)
-./bootgly test benchmark Template_Engine --opponents=bootgly,laravel --iterations=3
+./bootgly test benchmark Template_Engine --loads=default:* --opponents=bootgly,laravel --iterations=3
 
 # Bootgly only
-./bootgly test benchmark Template_Engine --opponents=bootgly
+./bootgly test benchmark Template_Engine --loads=default:* --opponents=bootgly
 ```
 
 ### Global options
@@ -151,7 +151,9 @@ The Bootgly engine does **not** sacrifice any feature available in Blade's
 ## ⚠️ Environment Notes
 
 - **Subprocess isolation**: each opponent runs in its own PHP process; memory is the peak of that process.
-- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between opponents stays consistent across environments. If Bootgly is faster in one environment, it is faster in others, even if the exact speedup factor varies.
+- **Result variance**: exact numbers and relative ratios vary with hardware,
+  OS, PHP, and host activity. Compare opponents within a controlled paired run;
+  cross-environment ordering and ratios are not guaranteed.
 - **Best-of-N**: with `--iterations>1`, the fastest run is reported to reduce noise.
 
 ---
@@ -165,6 +167,7 @@ The Bootgly engine does **not** sacrifice any feature available in Blade's
 | Bootgly | 0.046s | 🥇 First (winner) |
 | Laravel | 0.438s | 🥈 Second |
 
-Each run also saves a plain-text `.bench.marks` file under
-`bootgly/storage/tests/benchmarks/Template_Engine/`. See
+Each run also saves a plain-text `.bench.marks` file at
+`bootgly/storage/tests/benchmarks/Template_Engine/runs/<run-id>/marks/result_bench.marks`.
+See
 [`scripts/README.md`](../scripts/README.md) for chart generation.

@@ -115,13 +115,13 @@ All commands run from the **bootgly** directory.
 
 ```bash
 # All opponents, defaults
-./bootgly test benchmark Progress_Bar
+./bootgly test benchmark Progress_Bar --loads=default:* --opponents=bootgly,laravel
 
 # Both opponents, 3 iterations (best kept)
-./bootgly test benchmark Progress_Bar --opponents=bootgly,laravel --iterations=3
+./bootgly test benchmark Progress_Bar --loads=default:* --opponents=bootgly,laravel --iterations=3
 
 # Bootgly only
-./bootgly test benchmark Progress_Bar --opponents=bootgly
+./bootgly test benchmark Progress_Bar --loads=default:* --opponents=bootgly
 ```
 
 ### Global options
@@ -151,8 +151,14 @@ of iterations.
 ## ⚠️ Environment Notes
 
 - **Subprocess isolation**: each opponent runs in its own PHP process; memory is the peak of that process.
-- **Result variance**: exact numbers vary by hardware, OS, and PHP version — but the **relative** proportion between opponents stays consistent across environments.
+- **Result variance**: exact numbers and relative ratios vary with hardware,
+  OS, PHP, output sink, and host activity. Compare opponents within a controlled
+  paired run; cross-environment ratios are not guaranteed.
 - **Best-of-N**: with `--iterations>1`, the fastest run is reported to reduce noise.
+- **Output sink**: text mode inherits the caller's stdio descriptors, while
+  JSON mode captures child channels in regular files and closes stdin. The
+  marks record `execution-stdio`; do not treat results from different sinks as
+  equivalent samples.
 
 ---
 
@@ -173,6 +179,7 @@ of iterations.
 
 ![laravel-progress_bar-benchmark 1](https://github.com/bootgly/bootgly_benchmarks/raw/main/Progress_Bar/results/laravel-progress_bar-benchmark.1.png)
 
-Each run also saves a plain-text `.bench.marks` file under
-`bootgly/storage/tests/benchmarks/Progress_Bar/`. See
+Each run also saves a plain-text `.bench.marks` file at
+`bootgly/storage/tests/benchmarks/Progress_Bar/runs/<run-id>/marks/result_bench.marks`.
+See
 [`scripts/README.md`](../scripts/README.md) for chart generation.

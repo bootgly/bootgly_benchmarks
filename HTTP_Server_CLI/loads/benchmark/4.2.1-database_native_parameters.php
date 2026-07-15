@@ -7,6 +7,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/database/native/parameters'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['"value":42', '"label":"bootgly"'],

@@ -75,6 +75,25 @@ for ($i = 0; $i < $workers; $i++) {
 }
 
 if (!$serving) {
+    $PIDFile = getenv('AMPHP_PID_FILE');
+    if (is_string($PIDFile) && $PIDFile !== '') {
+        $temporary = $PIDFile . '.tmp-' . getmypid();
+        if (
+            file_put_contents($temporary, (string) getmypid(), LOCK_EX) === false
+            || !rename($temporary, $PIDFile)
+        ) {
+            @unlink($temporary);
+            foreach ($PIDs as $ChildPID) {
+                posix_kill($ChildPID, SIGTERM);
+            }
+            foreach ($PIDs as $ChildPID) {
+                pcntl_waitpid($ChildPID, $status);
+            }
+            fwrite(STDERR, "Could not publish the AMPHP supervisor PID artifact.\n");
+            exit(1);
+        }
+    }
+
     $exit = 0;
     foreach ($PIDs as $ChildPID) {
         $waited = pcntl_waitpid($ChildPID, $status);
@@ -86,12 +105,17 @@ if (!$serving) {
             $exit = 1;
         }
     }
+    if (is_string($PIDFile) && $PIDFile !== '') {
+        @unlink($PIDFile);
+    }
     exit($exit);
 }
 
 // ============================================================================
 // Worker child: own event loop.
 // ============================================================================
+
+WorkerEvidence::boot();
 
 // # ONE persistent async PostgreSQL pool per worker.
 $dbHost = getenv('DB_HOST') ?: '127.0.0.1';
@@ -167,25 +191,33 @@ $fetchWorld = static function ($Pool, int $id): array {
 
 $RequestHandler = new ClosureRequestHandler(
     static function (Request $Request) use (&$Pool, &$cachedWorlds, $clamp, $param, $fetchWorld): Response {
-        $headers = [];
+        $identity = null;
         if (WorkerEvidence::$enabled) {
             $identity = WorkerEvidence::identify(
                 $Request->getHeader('X-Bootgly-Benchmark-Warmup'),
+                $Request->getHeader('X-Bootgly-Benchmark-Nonce'),
                 $Request->getHeader('X-Bootgly-Benchmark-Seal'),
             );
-            if ($identity !== null) {
-                $headers['X-Bootgly-Benchmark-Worker'] = $identity;
-            }
         }
 
         $path = $Request->getUri()->getPath();
 
         // @ TechEmpower /plaintext + /json: static, no DB. Handle early.
         if ($path === '/plaintext') {
-            return new Response(HttpStatus::OK, $headers + ['content-type' => 'text/plain'], 'Hello, World!');
+            return new Response(HttpStatus::OK, $identity === null
+                ? ['content-type' => 'text/plain']
+                : [
+                    'content-type' => 'text/plain',
+                    'X-Bootgly-Benchmark-Worker' => $identity,
+                ], 'Hello, World!');
         }
         if ($path === '/json') {
-            return new Response(HttpStatus::OK, $headers + ['content-type' => 'application/json'], '{"message":"Hello, World!"}');
+            return new Response(HttpStatus::OK, $identity === null
+                ? ['content-type' => 'application/json']
+                : [
+                    'content-type' => 'application/json',
+                    'X-Bootgly-Benchmark-Worker' => $identity,
+                ], '{"message":"Hello, World!"}');
         }
 
         try {
@@ -268,16 +300,36 @@ $RequestHandler = new ClosureRequestHandler(
 
                 case '/':
                     // Warmup/probe — the runner warms up with GET /.
-                    return new Response(HttpStatus::OK, $headers + ['content-type' => 'text/plain'], 'TechEmpower Benchmark');
+                    return new Response(HttpStatus::OK, $identity === null
+                        ? ['content-type' => 'text/plain']
+                        : [
+                            'content-type' => 'text/plain',
+                            'X-Bootgly-Benchmark-Worker' => $identity,
+                        ], 'TechEmpower Benchmark');
 
                 default:
-                    return new Response(HttpStatus::NOT_FOUND, $headers + ['content-type' => 'text/plain'], 'Not Found');
+                    return new Response(HttpStatus::NOT_FOUND, $identity === null
+                        ? ['content-type' => 'text/plain']
+                        : [
+                            'content-type' => 'text/plain',
+                            'X-Bootgly-Benchmark-Worker' => $identity,
+                        ], 'Not Found');
             }
 
-            return new Response(HttpStatus::OK, $headers + ['content-type' => $contentType], $body);
+            return new Response(HttpStatus::OK, $identity === null
+                ? ['content-type' => $contentType]
+                : [
+                    'content-type' => $contentType,
+                    'X-Bootgly-Benchmark-Worker' => $identity,
+                ], $body);
         }
         catch (Throwable $Throwable) {
-            return new Response(HttpStatus::INTERNAL_SERVER_ERROR, $headers + ['content-type' => 'text/plain'], $Throwable->getMessage());
+            return new Response(HttpStatus::INTERNAL_SERVER_ERROR, $identity === null
+                ? ['content-type' => 'text/plain']
+                : [
+                    'content-type' => 'text/plain',
+                    'X-Bootgly-Benchmark-Worker' => $identity,
+                ], $Throwable->getMessage());
         }
     }
 );

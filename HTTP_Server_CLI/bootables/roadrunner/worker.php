@@ -22,6 +22,8 @@ $worker  = Worker::create();
 $factory = new Psr17Factory();
 $psr7    = new PSR7Worker($worker, $factory, $factory, $factory);
 
+WorkerEvidence::boot();
+
 $static = [
    '/'        => 'Home',
    '/about'   => 'About',
@@ -39,24 +41,30 @@ for ($i = 11; $i <= 100; $i++) {
    $static["/static/{$i}"] = "Static {$i}";
 }
 
+$headers = ['Content-Type' => 'text/plain'];
+
 while ($request = $psr7->waitRequest()) {
    try {
-      $headers = ['Content-Type' => 'text/plain'];
+      $identity = null;
       if (WorkerEvidence::$enabled) {
          $identity = WorkerEvidence::identify(
             $request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $request->getHeaderLine('X-Bootgly-Benchmark-Nonce'),
             $request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
          );
-         if ($identity !== null) {
-            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
-         }
       }
 
       $path = $request->getUri()->getPath();
 
       // Static routes
       if (isset($static[$path])) {
-         $psr7->respond(new Response(200, $headers, $static[$path]));
+         $psr7->respond(new Response(
+            200,
+            $identity === null
+               ? $headers
+               : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+            $static[$path],
+         ));
          continue;
       }
 
@@ -99,25 +107,55 @@ while ($request = $psr7->waitRequest()) {
          };
 
          if ($body !== null) {
-            $psr7->respond(new Response(200, $headers, $body));
+            $psr7->respond(new Response(
+               200,
+               $identity === null
+                  ? $headers
+                  : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+               $body,
+            ));
             continue;
          }
       }
 
       if ($n === 3 && $parts[0] === 'api' && $parts[1] === 'v1') {
-         $psr7->respond(new Response(200, $headers, 'API: ' . $parts[2]));
+         $psr7->respond(new Response(
+            200,
+            $identity === null
+               ? $headers
+               : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+            'API: ' . $parts[2],
+         ));
          continue;
       }
 
       // Extra dynamic routes (d11..d100)
       if ($n === 2 && $parts[0][0] === 'd' && ctype_digit(substr($parts[0], 1))) {
-         $psr7->respond(new Response(200, $headers, 'Dynamic ' . $parts[1]));
+         $psr7->respond(new Response(
+            200,
+            $identity === null
+               ? $headers
+               : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+            'Dynamic ' . $parts[1],
+         ));
          continue;
       }
 
       // Catch-all 404
-      $psr7->respond(new Response(404, $headers, 'Not Found'));
+      $psr7->respond(new Response(
+         404,
+         $identity === null
+            ? $headers
+            : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+         'Not Found',
+      ));
    } catch (\Throwable $e) {
-      $psr7->respond(new Response(500, $headers, 'Internal Server Error'));
+      $psr7->respond(new Response(
+         500,
+         $identity === null
+            ? $headers
+            : $headers + ['X-Bootgly-Benchmark-Worker' => $identity],
+         'Internal Server Error',
+      ));
    }
 }

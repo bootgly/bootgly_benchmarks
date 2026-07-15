@@ -23,6 +23,7 @@ $pdo = null;
 $cachedWorlds = [];
 
 $http_worker->onWorkerStart = function () use (&$pdo, &$cachedWorlds) {
+    WorkerEvidence::boot();
     Header::$date = gmdate('D, d M Y H:i:s').' GMT';
     Timer::add(1, function() {
         Header::$date = gmdate('D, d M Y H:i:s').' GMT';
@@ -99,28 +100,40 @@ $fetchWorld = function (PDOStatement $Statement, int $id): array {
 
 $http_worker->onMessage = function ($connection, Request $request) use (&$pdo, &$cachedWorlds, $clamp, $fetchWorld) {
     $path = $request->path();
-    $headers = [
-        'Content-Type' => 'text/plain',
-        'Date'         => Header::$date,
-    ];
+    $identity = null;
     if (WorkerEvidence::$enabled) {
         $identity = WorkerEvidence::identify(
             $request->header('x-bootgly-benchmark-warmup'),
+            $request->header('x-bootgly-benchmark-nonce'),
             $request->header('x-bootgly-benchmark-seal'),
         );
-        if ($identity !== null) {
-            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
-        }
     }
 
     // TechEmpower /plaintext + /json: static, no DB. Handle early.
     if ($path === '/plaintext') {
-        $connection->send(new Response(200, $headers, 'Hello, World!'));
+        $connection->send(new Response(200, $identity === null
+            ? [
+                'Content-Type' => 'text/plain',
+                'Date'         => Header::$date,
+            ]
+            : [
+                'Content-Type' => 'text/plain',
+                'Date'         => Header::$date,
+                'X-Bootgly-Benchmark-Worker' => $identity,
+            ], 'Hello, World!'));
         return;
     }
     if ($path === '/json') {
-        $headers['Content-Type'] = 'application/json';
-        $connection->send(new Response(200, $headers, '{"message":"Hello, World!"}'));
+        $connection->send(new Response(200, $identity === null
+            ? [
+                'Content-Type' => 'application/json',
+                'Date'         => Header::$date,
+            ]
+            : [
+                'Content-Type' => 'application/json',
+                'Date'         => Header::$date,
+                'X-Bootgly-Benchmark-Worker' => $identity,
+            ], '{"message":"Hello, World!"}'));
         return;
     }
 
@@ -209,20 +222,54 @@ $http_worker->onMessage = function ($connection, Request $request) use (&$pdo, &
 
             case '/':
                 // Warmup/probe — the runner warms up with GET /.
-                $connection->send(new Response(200, $headers, 'TechEmpower Benchmark'));
+                $connection->send(new Response(200, $identity === null
+                    ? [
+                        'Content-Type' => 'text/plain',
+                        'Date'         => Header::$date,
+                    ]
+                    : [
+                        'Content-Type' => 'text/plain',
+                        'Date'         => Header::$date,
+                        'X-Bootgly-Benchmark-Worker' => $identity,
+                    ], 'TechEmpower Benchmark'));
                 return;
 
             default:
-                $connection->send(new Response(404, $headers, 'Not Found'));
+                $connection->send(new Response(404, $identity === null
+                    ? [
+                        'Content-Type' => 'text/plain',
+                        'Date'         => Header::$date,
+                    ]
+                    : [
+                        'Content-Type' => 'text/plain',
+                        'Date'         => Header::$date,
+                        'X-Bootgly-Benchmark-Worker' => $identity,
+                    ], 'Not Found'));
                 return;
         }
 
-        $headers['Content-Type'] = $contentType;
-        $connection->send(new Response(200, $headers, $body));
+        $connection->send(new Response(200, $identity === null
+            ? [
+                'Content-Type' => $contentType,
+                'Date'         => Header::$date,
+            ]
+            : [
+                'Content-Type' => $contentType,
+                'Date'         => Header::$date,
+                'X-Bootgly-Benchmark-Worker' => $identity,
+            ], $body));
     }
     catch (Throwable $Throwable) {
-        $headers['Content-Type'] = 'text/plain';
-        $connection->send(new Response(500, $headers, $Throwable->getMessage()));
+        $connection->send(new Response(500, $identity === null
+            ? [
+                'Content-Type' => 'text/plain',
+                'Date'         => Header::$date,
+            ]
+            : [
+                'Content-Type' => 'text/plain',
+                'Date'         => Header::$date,
+                'X-Bootgly-Benchmark-Worker' => $identity,
+            ], $Throwable->getMessage()));
     }
 };
 

@@ -8,6 +8,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/fortunes'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['<table>', 'fortune'],

@@ -8,6 +8,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/database/resource/cached'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['"ok":1'],

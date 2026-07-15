@@ -7,6 +7,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/database/resource/pool'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['"errors":[]', '"value":1', '"value":2', '"value":3'],

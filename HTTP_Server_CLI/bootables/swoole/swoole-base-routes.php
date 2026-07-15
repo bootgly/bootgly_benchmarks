@@ -47,6 +47,10 @@ if ($PIDFile !== null) {
 }
 $Server->set($settings);
 
+$Server->on('workerStart', static function (): void {
+   WorkerEvidence::boot();
+});
+
 $static = [
    '/'        => 'Home',
    '/about'   => 'About',
@@ -68,6 +72,7 @@ $Server->on('request', function (Request $request, Response $response) use ($sta
    if (WorkerEvidence::$enabled) {
       $identity = WorkerEvidence::identify(
          $request->header['x-bootgly-benchmark-warmup'] ?? null,
+         $request->header['x-bootgly-benchmark-nonce'] ?? null,
          $request->header['x-bootgly-benchmark-seal'] ?? null,
       );
       if ($identity !== null) {

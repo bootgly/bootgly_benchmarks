@@ -90,17 +90,17 @@ $worker  = Worker::create();
 $factory = new Psr17Factory();
 $psr7    = new PSR7Worker($worker, $factory, $factory, $factory);
 
+WorkerEvidence::boot();
+
 while ($request = $psr7->waitRequest()) {
    try {
-      $headers = [];
+      $identity = null;
       if (WorkerEvidence::$enabled) {
          $identity = WorkerEvidence::identify(
             $request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $request->getHeaderLine('X-Bootgly-Benchmark-Nonce'),
             $request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
          );
-         if ($identity !== null) {
-            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
-         }
       }
 
       $path  = $request->getUri()->getPath();
@@ -108,11 +108,21 @@ while ($request = $psr7->waitRequest()) {
 
       // /plaintext + /json: static, no DB. Handle early.
       if ($path === '/plaintext') {
-         $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/plain'], 'Hello, World!'));
+         $psr7->respond(new Response(200, $identity === null
+            ? ['Content-Type' => 'text/plain']
+            : [
+               'Content-Type' => 'text/plain',
+               'X-Bootgly-Benchmark-Worker' => $identity,
+            ], 'Hello, World!'));
          continue;
       }
       if ($path === '/json') {
-         $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}'));
+         $psr7->respond(new Response(200, $identity === null
+            ? ['Content-Type' => 'application/json']
+            : [
+               'Content-Type' => 'application/json',
+               'X-Bootgly-Benchmark-Worker' => $identity,
+            ], '{"message":"Hello, World!"}'));
          continue;
       }
 
@@ -120,7 +130,12 @@ while ($request = $psr7->waitRequest()) {
          case '/db':
             $World = $fetchWorld($worldStatement, mt_rand(1, 10000));
             $body = json_encode($World, JSON_NUMERIC_CHECK) ?: '{}';
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'application/json']
+               : [
+                  'Content-Type' => 'application/json',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], $body));
             continue 2;
 
          case '/query':
@@ -130,7 +145,12 @@ while ($request = $psr7->waitRequest()) {
                $Worlds[] = $fetchWorld($worldStatement, mt_rand(1, 10000));
             }
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'application/json']
+               : [
+                  'Content-Type' => 'application/json',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], $body));
             continue 2;
 
          case '/fortunes':
@@ -152,7 +172,12 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = "<!DOCTYPE html><html><head><title>Fortunes</title></head><body><table><tr><th>id</th><th>message</th></tr>{$html}</table></body></html>";
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/html; charset=utf-8'], $body));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'text/html; charset=utf-8']
+               : [
+                  'Content-Type' => 'text/html; charset=utf-8',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], $body));
             continue 2;
 
          case '/updates':
@@ -185,7 +210,12 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'application/json']
+               : [
+                  'Content-Type' => 'application/json',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], $body));
             continue 2;
 
          case '/cached-queries':
@@ -199,19 +229,39 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'application/json']
+               : [
+                  'Content-Type' => 'application/json',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], $body));
             continue 2;
 
          case '/':
             // Warmup/probe: the runner warms up with GET /.
-            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark'));
+            $psr7->respond(new Response(200, $identity === null
+               ? ['Content-Type' => 'text/plain']
+               : [
+                  'Content-Type' => 'text/plain',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], 'TechEmpower Benchmark'));
             continue 2;
 
          default:
-            $psr7->respond(new Response(404, $headers + ['Content-Type' => 'text/plain'], 'Not Found'));
+            $psr7->respond(new Response(404, $identity === null
+               ? ['Content-Type' => 'text/plain']
+               : [
+                  'Content-Type' => 'text/plain',
+                  'X-Bootgly-Benchmark-Worker' => $identity,
+               ], 'Not Found'));
             continue 2;
       }
    } catch (\Throwable $e) {
-      $psr7->respond(new Response(500, $headers + ['Content-Type' => 'text/plain'], 'Internal Server Error'));
+      $psr7->respond(new Response(500, $identity === null
+         ? ['Content-Type' => 'text/plain']
+         : [
+            'Content-Type' => 'text/plain',
+            'X-Bootgly-Benchmark-Worker' => $identity,
+         ], 'Internal Server Error'));
    }
 }

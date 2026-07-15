@@ -23,6 +23,7 @@ final class WorkerEvidenceMiddleware implements MiddlewareInterface
       $Response = $Handler->handle($Request);
       $identity = WorkerEvidence::identify(
          $Request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+         $Request->getHeaderLine('X-Bootgly-Benchmark-Nonce'),
          $Request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
       );
 

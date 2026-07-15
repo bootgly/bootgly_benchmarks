@@ -1,0 +1,194 @@
+name: Benchmark harness (test + PHPStan)
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework_ref:
+        description: 'bootgly/bootgly Git ref to test with.'
+        required: false
+        default: 'main'
+  push:
+    branches:
+      - 'main'
+    paths:
+      - '.github/workflows/quality.yml'
+      - 'HTTP_Server_CLI/**'
+      - 'runners/**'
+  pull_request:
+    paths:
+      - '.github/workflows/quality.yml'
+      - 'HTTP_Server_CLI/**'
+      - 'runners/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-harness-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout bootgly_benchmarks
+        uses: actions/checkout@v5
+        with:
+          path: bootgly_benchmarks
+          persist-credentials: false
+
+      - name: Checkout bootgly framework
+        uses: actions/checkout@v5
+        with:
+          repository: bootgly/bootgly
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.framework_ref || 'main' }}
+          path: bootgly
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          ini-file: 'development'
+          ini-values: disable_functions=""
+          extensions: mbstring, pcntl, posix, sockets
+          coverage: none
+
+      - name: Install framework development dependencies
+        working-directory: bootgly
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Record exact source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          FRAMEWORK_SHA="$(git -C bootgly rev-parse HEAD)"
+          BENCHMARKS_SHA="$(git -C bootgly_benchmarks rev-parse HEAD)"
+          {
+            echo '### Benchmark harness quality inputs'
+            echo
+            echo "- Framework: \`bootgly/bootgly@$FRAMEWORK_SHA\`"
+            echo "- Benchmarks: \`${{ github.repository }}@$BENCHMARKS_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint benchmark bootables
+        working-directory: bootgly_benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' PHP_FILES < <(
+            find HTTP_Server_CLI/bootables HTTP_Server_CLI/opponents \
+              -path '*/vendor' -prune -o -type f -name '*.php' -print0
+          )
+          for PHP_FILE in "${PHP_FILES[@]}"; do
+            php -l "$PHP_FILE" >/dev/null
+          done
+          echo "Linted ${#PHP_FILES[@]} benchmark bootable/opponent PHP files."
+
+      - name: Run official worker-proof and database-parity tests
+        working-directory: bootgly
+        shell: bash
+        env:
+          AI_AGENT: '1'
+          BOOTGLY_TEST_TRACE: 1
+        run: |
+          set -euo pipefail
+
+          REQUIRED_SIBLING_TESTS=(
+            '../bootgly_benchmarks/runners/tests/WorkerWarmup.test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerEvidence.test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerGeneration.test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerGenerationRunnerFault.test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerSweep.test.php'
+            '../bootgly_benchmarks/runners/tests/AMPHPStop.test.php'
+            '../bootgly_benchmarks/runners/tests/HTTPServerDatabaseParity.test.php'
+            '../bootgly_benchmarks/runners/WorkerSweep.php'
+          )
+          for TEST_FILE in "${REQUIRED_SIBLING_TESTS[@]}"; do
+            if [ ! -f "$TEST_FILE" ]; then
+              echo "::error file=$TEST_FILE::Required sibling test is absent; refusing a skipped release gate."
+              exit 1
+            fi
+          done
+
+          mapfile -t TARGETS < <(php -r '
+          require "autoboot.php";
+          $Tests = new Bootgly\ACI\Tests;
+          $suite = array_search(
+             "Bootgly/ACI/Tests/Benchmark/",
+             $Tests->Suites->directories,
+             true,
+          );
+          if ($suite === false) {
+             fwrite(STDERR, "Benchmark test suite is not registered.\n");
+             exit(1);
+          }
+          $Suite = require "Bootgly/ACI/Tests/Benchmark/tests/autoboot.php";
+          foreach ($Suite->tests as $case => $name) {
+             if (preg_match("/\\A6\\.(?:7|8|10|14|16|17)\\./D", $name) === 1) {
+                echo ($suite + 1), " ", ($case + 1), " ", $name, PHP_EOL;
+             }
+          }
+          ')
+
+          REQUIRED_CASES=(
+            '6.7.1-child-capture_channels'
+            '6.8.1-command-supervise-json_document'
+            '6.10.1-runtime-export-redact_directives'
+            '6.14.1-code_runner-enforce_timeout'
+            '6.16.1-worker_evidence-prove_protocol'
+            '6.16.2-worker_warmup-prove_matrix'
+            '6.16.3-worker_evidence-prove_generic_lifecycle'
+            '6.16.4-worker_generation-prove_stability'
+            '6.16.5-worker_generation-reject_runner_fault'
+            '6.16.6-worker_sweep-reject-late_matrix'
+            '6.16.7-amphp-stop-isolate-worker_tree'
+            '6.17.1-database_parity-enforce_contract'
+          )
+          for REQUIRED_CASE in "${REQUIRED_CASES[@]}"; do
+            FOUND=false
+            for TARGET in "${TARGETS[@]}"; do
+              if [[ "$TARGET" == *" $REQUIRED_CASE" ]]; then
+                FOUND=true
+                break
+              fi
+            done
+            if [ "$FOUND" != true ]; then
+              echo "::error::Required official case is not registered: $REQUIRED_CASE"
+              exit 1
+            fi
+          done
+
+          for TARGET in "${TARGETS[@]}"; do
+            read -r SUITE CASE NAME <<< "$TARGET"
+            echo "::group::$NAME"
+            timeout --signal=TERM --kill-after=30 180 \
+              php bootgly test "$SUITE" "$CASE"
+            echo '::endgroup::'
+          done
+
+      - name: Run PHPStan level 9 on portable P0 orchestration
+        working-directory: bootgly
+        run: |
+          vendor/bin/phpstan analyse \
+            -c @/phpstan.neon \
+            --level=9 \
+            --no-progress \
+            Bootgly/ACI/Tests/Benchmark/Child.php \
+            Bootgly/ACI/Tests/Benchmark/Runtime.php \
+            projects/Benchmark/HTTP_Server_CLI/Encoders/WorkerEvidence.php \
+            ../bootgly_benchmarks/runners/Code.php \
+            ../bootgly_benchmarks/runners/RunArtifacts.php \
+            ../bootgly_benchmarks/runners/ServerCapture.php \
+            ../bootgly_benchmarks/runners/ServerReadiness.php \
+            ../bootgly_benchmarks/runners/WorkerWarmup.php \
+            ../bootgly_benchmarks/runners/WorkerGeneration.php \
+            ../bootgly_benchmarks/runners/WorkerSweep.php \
+            ../bootgly_benchmarks/runners/TCP_Client.php \
+            ../bootgly_benchmarks/runners/HTTP_Client.php \
+            ../bootgly_benchmarks/HTTP_Server_CLI/DatabaseParity.php \
+            ../bootgly_benchmarks/HTTP_Server_CLI/opponents/amphp/amphp.php \
+            ../bootgly_benchmarks/HTTP_Server_CLI/bootables/WorkerEvidence.php \
+            ../bootgly_benchmarks/HTTP_Server_CLI/autoboot.php

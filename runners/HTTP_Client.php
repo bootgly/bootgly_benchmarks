@@ -17,11 +17,14 @@ use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\Benchmarks\Runners\RunProcess;
 use Bootgly\Benchmarks\Runners\ServerReadiness;
+use Bootgly\Benchmarks\Runners\WorkerGeneration;
+use Bootgly\Benchmarks\Runners\WorkerGenerationFailure;
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
 use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 
 require_once __DIR__ . '/RunArtifacts.php';
 require_once __DIR__ . '/ServerReadiness.php';
+require_once __DIR__ . '/WorkerGeneration.php';
 require_once __DIR__ . '/WorkerWarmup.php';
 
 
@@ -42,6 +45,7 @@ return new class (
    public int $workers = 0;
    // # warmup
    public int $warmupDuration = 5;
+   public string|int|float $workerProofBudget = 'auto';
    // # server readiness
    public int $readyTimeout = 10;
 
@@ -79,6 +83,16 @@ return new class (
       if (isset($options['warmup'])) {
          $this->warmupDuration = (int) $options['warmup'];
       }
+      if (array_key_exists('worker-proof-budget', $options)) {
+         $budget = $options['worker-proof-budget'];
+         if (!is_string($budget) && !is_int($budget)) {
+            throw new InvalidArgumentException(
+               '--worker-proof-budget must be auto or a positive number of seconds.',
+            );
+         }
+         WorkerWarmup::plan(['paths' => ['/']], workers: 1, budget: $budget);
+         $this->workerProofBudget = $budget;
+      }
       if ($this->warmupDuration < 1) {
          throw new InvalidArgumentException('--warmup must be a positive number of seconds.');
       }
@@ -88,6 +102,7 @@ return new class (
       $this->meta['duration'] = $this->duration;
       $this->meta['client-workers'] = $this->workers;
       $this->meta['warmup'] = $this->warmupDuration;
+      $this->meta['worker-proof-budget'] = $this->workerProofBudget;
    }
    public function options (): array
    {
@@ -96,6 +111,7 @@ return new class (
          '--connections=N'    => 'Number of TCP connections (default: 514)',
          '--duration=N'       => 'Benchmark duration in seconds (default: 10)',
          '--warmup=N'         => 'Selected-load warmup duration in seconds (default: 5)',
+         '--worker-proof-budget=auto|SECONDS' => 'Worker/path proof budget (default: auto, up to 4096 cells)',
       ];
    }
 
@@ -125,13 +141,17 @@ return new class (
     */
    public function banner (Configs $Configs): array
    {
+      $proofBudget = strtolower((string) $this->workerProofBudget) === 'auto'
+         ? 'auto · workload-scaled · up to 4,096 cells'
+         : "{$this->workerProofBudget} s · explicit";
       $sections = [
          'Client' => [
             'Engine'         => 'Bootgly HTTP_Client_CLI',
             'Client workers' => (string) $this->resolveClientWorkers(),
             'Connections'    => (string) $this->connections,
             'Duration'       => "{$this->duration} s",
-            'Warmup'         => "{$this->warmupDuration} s · selected load · worker proof",
+            'Warmup traffic' => "{$this->warmupDuration} s · selected load",
+            'Proof budget'   => $proofBudget,
          ],
          'Server' => [
             'Port' => (string) $this->port,
@@ -167,10 +187,13 @@ return new class (
       $interrupted = false;
       pcntl_async_signals(true);
       pcntl_signal(SIGINT, function () use (&$activeOpponent, &$stopping, &$interrupted) {
+         // The signal callback observes mutations performed after registration.
+         // @phpstan-ignore if.alwaysFalse
          if ($stopping) {
             $interrupted = true;
             return;
          }
+         // @phpstan-ignore notIdentical.alwaysFalse
          if ($activeOpponent !== null) {
             $Opponent = $activeOpponent;
             $activeOpponent = null;
@@ -232,7 +255,9 @@ return new class (
 
             // @ Worker evidence is sealed permanently inside each server process.
             // ! Give every load a fresh server lifecycle so its own selected-load
-            // ! warmup can be proved and then fully removed before measurement.
+            //   warmup can be proved and then stops emitting evidence before
+            //   measurement. Bootgly restores its original handler/encoder;
+            // ! external bootables retain a disabled request guard.
             $warmupToken = WorkerWarmup::issue();
             $this->killPort();
             $activeOpponent = $Opponent;
@@ -270,6 +295,7 @@ return new class (
                $this->stopServer($Opponent);
                $activeOpponent = null;
                $stopping = false;
+               // @phpstan-ignore if.alwaysFalse
                if ($interrupted) {
                   exit(130);
                }
@@ -293,6 +319,7 @@ return new class (
             $this->stopServer($Opponent);
             $activeOpponent = null;
             $stopping = false;
+            // @phpstan-ignore if.alwaysFalse
             if ($interrupted) {
                exit(130);
             }
@@ -437,7 +464,10 @@ return new class (
             continue;
          }
          if ($swoole && (
+            // Process liveness can change between the readiness probes.
+            // @phpstan-ignore booleanOr.alwaysFalse, identical.alwaysFalse
             $this->ServerProcess === null
+            // @phpstan-ignore booleanNot.alwaysFalse
             || !$this->ServerProcess->check()
             || ServerReadiness::inspect($PIDFile, $bootable) !== $identity
          )) {
@@ -456,6 +486,15 @@ return new class (
     * used for measurement, then use worker coverage as the final preflight.
     *
     * @param array<string,mixed> $load
+    * @return array{
+    *    workers:list<string>,
+    *    cells_covered:int,
+    *    cells_expected:int,
+    *    responses:int,
+    *    requests:int,
+    *    rounds:list<array{workers:list<string>}>,
+    *    failures:array<string,int>
+    * }|false
     */
    private function warmup (
       array $load,
@@ -466,13 +505,15 @@ return new class (
       int $clientWorkers,
       string $opponent,
       string $label,
-   ): bool
+      string $measurementID,
+   ): array|false
    {
       $workerScript = __DIR__ . '/HTTP_Client/worker.php';
       $Artifacts = RunArtifacts::create('http-client-warmup');
       $input = $Artifacts->write('input.json', $JSON);
       $Warmup = new WorkerWarmup('127.0.0.1', $this->port);
       $context = [
+         'measurement_id' => $measurementID,
          'opponent' => $opponent,
          'label' => $label,
          'load_input_sha256' => 'sha256:' . hash('sha256', $JSON),
@@ -511,14 +552,33 @@ return new class (
             throw new WorkerWarmupFailure('Sustained warmup output could not be read.', $coverage);
          }
 
-         $budget = min(30.0, max(10.0, 5.0 + ($serverWorkers * 0.5)));
          $coverage = $Warmup->probe(
             load: $load,
             token: $token,
             workers: $serverWorkers,
-            budget: $budget,
+            budget: $this->workerProofBudget,
+            effectivePoolSlots: isset($this->meta['db-pool-max'])
+               ? (int) $this->meta['db-pool-max']
+               : null,
          );
+         /** @var array{
+          *    workers:list<string>,
+          *    cells_covered:int,
+          *    cells_expected:int,
+          *    responses:int,
+          *    requests:int,
+          *    rounds:list<array{workers:list<string>}>,
+          *    failures:array<string,int>
+          * } $coverage
+          */
          $traffic = $Warmup->validate($output, $coverage, $this->warmupDuration);
+         /** @var array{
+          *    responses:int,
+          *    failed:int,
+          *    write_failed:int,
+          *    connection_failed:int
+          * } $traffic
+          */
          $evidence = $Warmup->compose($coverage, $traffic);
          $evidence['context'] = $context;
          $Artifacts->write(
@@ -531,13 +591,14 @@ return new class (
 
          $covered = count($coverage['workers']);
          echo "      Warmup {$this->warmupDuration}s: {$covered}/{$serverWorkers} workers"
+            . " · cells={$coverage['cells_covered']}/{$coverage['cells_expected']}"
             . " · probe={$coverage['responses']}/{$coverage['requests']}"
             . " · responses={$traffic['responses']}"
             . " · failed={$traffic['failed']}"
             . " · write-failed={$traffic['write_failed']}"
             . " · connection-failed={$traffic['connection_failed']}\n";
 
-         return true;
+         return $coverage;
       }
       catch (Throwable $Throwable) {
          $partial = $Throwable instanceof WorkerWarmupFailure
@@ -545,7 +606,7 @@ return new class (
             : $coverage;
          $evidence = [
             'schema' => 'bootgly.worker-aware-warmup',
-            'version' => 1,
+            'version' => 2,
             'validated' => false,
             'context' => $context,
             'error' => $Throwable->getMessage(),
@@ -554,9 +615,9 @@ return new class (
          if (is_array($execution)) {
             $evidence['traffic_process'] = [
                'exit' => $execution['exit'],
-               'timed_out' => $execution['timed_out'] ?? false,
-               'state' => $execution['state'] ?? null,
-               'signal' => $execution['signal'] ?? null,
+               'timed_out' => $execution['timed_out'],
+               'state' => $execution['state'],
+               'signal' => $execution['signal'],
             ];
          }
 
@@ -575,7 +636,9 @@ return new class (
 
          $rounds = is_array($partial['rounds'] ?? null) ? $partial['rounds'] : [];
          $last = $rounds === [] ? [] : $rounds[array_key_last($rounds)];
-         $covered = count(is_array($last['workers'] ?? null) ? $last['workers'] : []);
+         $covered = is_array($last) && is_array($last['workers'] ?? null)
+            ? count($last['workers'])
+            : 0;
          $responses = is_int($partial['responses'] ?? null) ? $partial['responses'] : 0;
          $failures = is_array($partial['failures'] ?? null)
             ? array_sum($partial['failures'])
@@ -610,9 +673,11 @@ return new class (
 
          return new Result();
       }
+      /** @var array<string,mixed> $loadData */
 
       $JSON = json_encode($loadData, JSON_THROW_ON_ERROR);
-      if (!$this->warmup(
+      $measurementID = bin2hex(random_bytes(16));
+      $coverage = $this->warmup(
          $loadData,
          $JSON,
          $token,
@@ -621,24 +686,145 @@ return new class (
          $clientWorkers,
          $opponent,
          $Load->label,
-      )) {
+         $measurementID,
+      );
+      if ($coverage === false) {
          return new Result();
       }
 
       $Artifacts = RunArtifacts::create('http-client-load');
+      $measurementContext = [
+         'schema' => 'bootgly.measurement-context',
+         'version' => 1,
+         'measurement_id' => $measurementID,
+         'runner' => 'http_client',
+         'opponent' => $opponent,
+         'label' => $Load->label,
+         'load_input_sha256' => 'sha256:' . hash('sha256', $JSON),
+         'requested_duration' => $this->duration,
+         'server_workers' => $serverWorkers,
+         'client_workers' => $clientWorkers,
+         'connections' => $connections,
+         'pipeline' => 1,
+         'db_pool_max' => isset($this->meta['db-pool-max'])
+            ? (int) $this->meta['db-pool-max']
+            : null,
+      ];
+      $Artifacts->write(
+         'context.json',
+         json_encode(
+            $measurementContext,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+         ) . "\n",
+      );
       $input = $Artifacts->write('input.json', $JSON);
 
+      $GenerationArtifacts = RunArtifacts::create('http-client-generation');
+      $generationContext = $measurementContext;
+
       try {
-         $execution = $Artifacts->run([
-            PHP_BINARY,
-            $workerScript,
-            '--host=127.0.0.1',
-            "--port={$this->port}",
-            "--connections={$connections}",
-            "--duration={$this->duration}",
-            "--paths-file={$input}",
-            "--workers={$clientWorkers}",
-         ], $this->duration + 30.0, 2.0);
+         $Generation = new WorkerGeneration();
+         $workerDirectory = $this->ServerArtifacts?->resolve('workers');
+         if (!is_string($workerDirectory) || $workerDirectory === '') {
+            throw new RuntimeException('Worker-generation server artifacts are unavailable.');
+         }
+         $baseline = $Generation->capture(
+            $workerDirectory,
+            $coverage['workers'],
+         );
+      }
+      catch (Throwable $Throwable) {
+         $failure = [
+            'schema' => 'bootgly.worker-generation',
+            'version' => 1,
+            'validated' => false,
+            'stable' => false,
+            'context' => $generationContext,
+            'stage' => 'baseline',
+            'error' => $Throwable->getMessage(),
+            'baseline' => $Throwable instanceof WorkerGenerationFailure
+               ? $Throwable->evidence
+               : [],
+         ];
+
+         try {
+            $GenerationArtifacts->write(
+               'generation.json',
+               json_encode(
+                  $failure,
+                  JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+               ) . "\n",
+            );
+         }
+         catch (Throwable $EvidenceThrowable) {
+            echo "      Worker-generation evidence could not be persisted: {$EvidenceThrowable->getMessage()}\n";
+         }
+
+         echo "      Worker generation failed before measurement: {$Throwable->getMessage()}\n";
+         $Artifacts->clean();
+         $GenerationArtifacts->clean();
+
+         return new Result();
+      }
+
+      try {
+         $execution = null;
+         $MeasurementFailure = null;
+         try {
+            $execution = $Artifacts->run([
+               PHP_BINARY,
+               $workerScript,
+               '--host=127.0.0.1',
+               "--port={$this->port}",
+               "--connections={$connections}",
+               "--duration={$this->duration}",
+               "--paths-file={$input}",
+               "--workers={$clientWorkers}",
+            ], $this->duration + 30.0, 2.0);
+         }
+         catch (Throwable $Throwable) {
+            $MeasurementFailure = $Throwable;
+         }
+
+         // ! Withhold result parsing until the terminal worker generation is
+         //   proven equal to the sealed warmup generation.
+         $terminal = $Generation->verify($baseline);
+         /** @var array{
+          *    stable:bool,
+          *    changes:array<string,list<string>>,
+          *    failures:array<string,int>
+          * } $terminal
+          */
+         $generation = $Generation->compose($baseline, $terminal, $generationContext);
+         $GenerationArtifacts->write(
+            'generation.json',
+            json_encode(
+               $generation,
+               JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ) . "\n",
+         );
+
+         if ($MeasurementFailure !== null) {
+            throw $MeasurementFailure;
+         }
+         if ($terminal['stable'] !== true) {
+            $changes = [];
+            foreach ($terminal['changes'] as $name => $workers) {
+               if ($workers !== []) {
+                  $changes[] = $name . '=' . count($workers);
+               }
+            }
+            foreach ($terminal['failures'] as $name => $count) {
+               if ($count > 0) {
+                  $changes[] = $name . '=' . $count;
+               }
+            }
+            $detail = $changes === [] ? 'unclassified terminal mismatch' : implode(', ', $changes);
+            echo "      Worker generation changed during measurement: {$detail}\n";
+
+            return new Result();
+         }
+
          $output = $execution['exit'] === 0
             ? @file_get_contents($execution['stdout'])
             : false;
@@ -647,6 +833,7 @@ return new class (
       }
       finally {
          $Artifacts->clean();
+         $GenerationArtifacts->clean();
       }
    }
    private function parse (string $output): Result

@@ -213,9 +213,10 @@ automatically — even if you pass `--opponents=bootgly,swoole`.
 | 15 | `4.3.2-database_runner_pool` | DB probe | `/database/resource/pool` |
 | 16 | `4.4.1-database_native_sleep` | DB probe | `/database/native/sleep` |
 | 17 | `4.4.2-database_runner_sleep` | DB probe | `/database/resource/sleep` |
-| 18 | `z.1.1-mixed_8` | Mixed | 5 static + 3 dynamic |
-| 19 | `z.1.2-mixed_20` | Mixed | 10 static + 10 dynamic |
-| 20 | `z.1.3-full_mix` | Mixed | static + dynamic + nested + middleware + 404 |
+| 18 | `4.5.1-database_resource_cached` | DB probe | `/database/resource/cached` |
+| 19 | `z.1.1-mixed_8` | Mixed | 5 static + 3 dynamic |
+| 20 | `z.1.2-mixed_20` | Mixed | 10 static + 10 dynamic |
+| 21 | `z.1.3-full_mix` | Mixed | static + dynamic + nested + middleware + 404 |
 
 ### `@opponents` tag
 
@@ -225,8 +226,9 @@ Each load file has a `@opponents:` header controlling which opponents run it:
 - `Bootgly` — only Bootgly runs it; other opponents are skipped even when
   passed via `--opponents=`.
 
-This keeps the cross-framework `techempower` set fair while the `benchmark` set
-stays Bootgly-only.
+This keeps the cross-framework `techempower` set fair while allowing generic
+`benchmark` routes to run across opponents without exposing Bootgly-only DB
+probes as cross-framework comparisons.
 
 ### Database Benchmark
 
@@ -244,9 +246,9 @@ capability satisfies the harness parity contract:
 | `/cached-queries?count=20` | Fetch 20 random `CachedWorld` rows from an in-memory cache (primed from DB) |
 
 The Bootgly `benchmark` set additionally ships `SELECT 1`, parameterized,
-multi-query, and `pg_sleep` probes (loads `13–20`). They isolate DBAL/resource
-overhead but are Bootgly-only (`@opponents: Bootgly`), not a cross-framework
-comparison:
+multi-query, `pg_sleep`, and response-cache probes (loads `10–18`). They isolate
+DBAL/resource overhead but are Bootgly-only (`@opponents: Bootgly`), not a
+cross-framework comparison:
 
 | Native route | Resource route | Purpose |
 |--------------|----------------|---------|
@@ -254,6 +256,7 @@ comparison:
 | `/database/native/parameters` | `/database/resource/parameters` | parameterized query overhead |
 | `/database/native/pool` | `/database/resource/pool` | pool/concurrent operations overhead |
 | `/database/native/sleep` | `/database/resource/sleep` | slow async query overhead |
+| — | `/database/resource/cached` | route response-cache overhead |
 
 #### Running
 
@@ -299,9 +302,11 @@ pattern with `Swoole\Database\PDOPool` and does not use Bootgly runtime code.
 > ReactPHP, and Hyperf honor a configurable per-worker ceiling. Workerman,
 > RoadRunner, FrankenPHP, and Laravel Octane are fixed at one persistent database
 > connection per worker. Consequently, `DB_POOL_MAX=1` is the common comparable
-> setting; values greater than one are accepted only when every selected opponent
-> is pool-aware. Unknown or unclassified opponents are rejected for DB comparisons
-> until their behavior is inspected and registered.
+> and currently attestable setting. Database selections with a greater ceiling
+> fail closed until worker-aware warmup can identify every pool slot; non-database
+> selections and the in-memory `cached-queries` load may still carry another
+> value. Unknown or unclassified opponents are rejected for DB comparisons until
+> their behavior is inspected and registered.
 
 The contract validates the configured per-worker ceiling. It does not claim that
 the maximum number of PostgreSQL sessions was simultaneously open during a run.
@@ -327,9 +332,9 @@ From WSL2 / Ryzen 9 3900X / PostgreSQL `max_connections=100`:
   default observed so far.
 - `--server-workers=28` + `--client-workers=5` favored peak ping/parameter
   throughput, while 24/4 left more CPU headroom for pool-heavy loads.
-- `DB_POOL_MAX=1` is the universal cross-opponent comparison setting. Values above
-  one are tuning experiments valid only when all selected opponents are among the
-  pool-aware implementations; the harness rejects fixed-one opponents in that case.
+- `DB_POOL_MAX=1` is the universal cross-opponent comparison and worker-readiness
+  setting. Values above one remain tuning experiments outside publishable harness
+  runs until every selected worker/pool slot can be identified and proved.
 - Older `126k..130k req/s` artifacts did not validate HTTP status/body; the current
   TCP_Client preflight rejects 404/500 before timed runs.
 - `--connections=512` is a lower-latency alternative with similar throughput.
@@ -559,7 +564,11 @@ PostgreSQL loads also read `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`
 `DB_SSLMODE`, and `DB_POOL_MAX` (see [Database Benchmark](#database-benchmark)).
 For `techempower`, the harness defaults a missing/empty `DB_POOL_MAX` to `1`, records
 the effective value, and validates it against the selected opponents before starting
-any measured process.
+any measured process. The Bootgly-only `benchmark` database loads (indexes 10–18)
+require an explicit `DB_POOL_MAX=1`: worker-aware readiness currently proves the
+complete worker/resource matrix only when one database slot exists per worker.
+Higher ceilings fail closed before server startup instead of publishing partially
+warmed measurements; non-database `benchmark` loads remain unconstrained.
 
 ### Sweeps
 
@@ -802,15 +811,24 @@ PASS: database wait did not block the single HTTP worker.
 - **Worker-aware warmup**: immediately before each measured load, the harness
   runs that exact load for five seconds with the measured connection, client-
   worker, and pipeline settings. It then opens independent `Connection: close`
-  probes in two rounds and requires the same set of exactly `server-workers`
-  identities, successful path/status/body validation, and closed TCP accounting.
-  A missing worker, changed generation, invalid response, process failure, or
-  inconsistent ledger makes that result `N/A`; the measurement window is never
-  opened. Each run retains a token-free `evidence.json` with coverage, counters,
-  failures, durations, effective settings, and the selected-load hash.
-- **FrankenPHP worker proof**: its current bootables do not yet expose the
-  worker-evidence response header. This revision therefore fails closed with an
-  `N/A` result for FrankenPHP instead of opening an unproved measurement window.
+  probes in two rounds and requires the complete worker × selected-path matrix
+  for the same exact `server-workers` identities. Every acknowledgement is bound
+  to a fresh 256-bit nonce; status/body validation and sustained TCP accounting
+  must close before a one-way seal removes or disables evidence handling. Live
+  database loads additionally require the explicitly attestable one-slot-per-
+  worker configuration. Each run retains a token/nonce-free `evidence.json`.
+- **Measured worker generation**: after sealing, the runner binds those worker
+  fingerprints to lifetime-locked leases plus Linux PID/start-time/parent/boot
+  evidence. A baseline mismatch prevents measurement. The same proof is sampled
+  immediately after the client exits and before its output is parsed; a missing,
+  replaced, reparented, or additional worker makes the load `N/A` and retains the
+  otherwise raw measured output plus an invalid `generation.json`. The warmup
+  `evidence.json`, measured `context.json`, and `generation.json` share one
+  random 128-bit `measurement_id`, so evidence cannot be attributed by directory
+  order or opponent/load labels alone.
+- **FrankenPHP worker proof**: the tracked worker-mode bootables implement the
+  same nonce, seal, lease, and generation protocol. The Docker image pins the
+  standalone v1.12.4 binary and verifies its pinned SHA-256 at build.
 
 ---
 

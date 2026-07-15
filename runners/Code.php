@@ -177,10 +177,15 @@ return new class extends Runner
          ];
          $groupReady = $resultFile . '.group-ready';
          $environment = getenv();
+         // Keep the runtime fallback for PHP/environment variants that may fail here.
+         // @phpstan-ignore function.alreadyNarrowedType
          $environment = is_array($environment) ? $environment : [];
          $environment['BOOTGLY_PROCESS_GROUP_READY'] = $groupReady;
 
          $process = proc_open(
+            // The sibling class is loaded above; standalone PHPStan analysis does
+            // not discover symbols through this runtime require.
+            // @phpstan-ignore-next-line class.notFound
             command: RunArtifacts::isolate([PHP_BINARY, $Opponent->script]),
             descriptor_spec: $descriptors,
             pipes: $pipes,
@@ -194,14 +199,13 @@ return new class extends Runner
          }
 
          $status = proc_get_status($process);
-         $PID = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : null;
+         $PID = $status['pid'];
          $groupDeadline = microtime(true) + 2.0;
          $groupStarted = false;
 
          do {
             if (
-               $PID !== null
-               && is_file($groupReady)
+               is_file($groupReady)
                && trim((string) @file_get_contents($groupReady)) === (string) $PID
             ) {
                $groupStarted = true;
@@ -209,7 +213,7 @@ return new class extends Runner
             }
 
             $status = proc_get_status($process);
-            if (!is_array($status) || !$status['running']) {
+            if (!$status['running']) {
                break;
             }
 
@@ -219,7 +223,7 @@ return new class extends Runner
          @unlink($groupReady . '.tmp');
          @unlink($groupReady);
 
-         if (!$groupStarted || $PID === null) {
+         if (!$groupStarted) {
             @proc_terminate($process, 9);
             proc_close($process);
             putenv('BENCHMARK_RESULT_FILE');
@@ -244,12 +248,15 @@ return new class extends Runner
          return null;
       }
 
-      $json = file_get_contents($resultFile);
+      $JSON = file_get_contents($resultFile);
       if ($this->Artifacts === null) {
          @unlink($resultFile);
       }
+      if (!is_string($JSON)) {
+         return null;
+      }
 
-      $data = json_decode($json, true);
+      $data = json_decode($JSON, true);
 
       if ( !is_array($data) || $data === [] ) {
          return null;
@@ -272,9 +279,24 @@ return new class extends Runner
       // @ Build one Result per label
       $Results = [];
       foreach ($data as $label => $entry) {
+         // Both normalization branches above guarantee an array entry.
+         if (!is_array($entry)) {
+            return null;
+         }
+
+         $time = $entry['time'] ?? null;
+         if ($time !== null && !is_scalar($time)) {
+            return null;
+         }
+
+         $memory = $entry['memory'] ?? null;
+         if ($memory !== null && !is_int($memory)) {
+            return null;
+         }
+
          $Results[(string) $label] = new Result(
-            time: isset($entry['time']) ? (string) abs((float) $entry['time']) : null,
-            memory: $entry['memory'] ?? null,
+            time: $time !== null ? (string) abs((float) $time) : null,
+            memory: $memory,
          );
       }
 
@@ -296,21 +318,28 @@ return new class extends Runner
       $Poll = static function () use (&$Process, &$observedExit, &$signal, $PGID): bool {
          if (is_resource($Process)) {
             $status = proc_get_status($Process);
-            if (is_array($status) && !$status['running']) {
-               $observedExit = ($status['exitcode'] ?? -1) >= 0
-                  ? (int) $status['exitcode']
+            if (!$status['running']) {
+               $observedExit = $status['exitcode'] >= 0
+                  ? $status['exitcode']
                   : $observedExit;
-               $signal = ($status['signaled'] ?? false) && isset($status['termsig'])
-                  ? (int) $status['termsig']
+               $signal = $status['signaled']
+                  ? $status['termsig']
                   : $signal;
                $closedExit = proc_close($Process);
                $Process = null;
                $observedExit ??= $closedExit >= 0 ? $closedExit : null;
             }
-            else if (is_array($status) && $status['running']) {
+            else {
                return true;
             }
          }
+
+         // PHP becomes PID 1 in the framework container and adopts orphaned
+         // descendants. Reap only children from this isolated process group
+         // so a zombie cannot keep the timeout loop alive indefinitely.
+         do {
+            $reaped = pcntl_waitpid(-$PGID, $childStatus, WNOHANG);
+         } while ($reaped > 0);
 
          return @posix_kill(-$PGID, 0);
       };
@@ -323,23 +352,24 @@ return new class extends Runner
          }
       };
 
-      while ($Poll()) {
+      $running = $Poll();
+      while ($running) {
          if (microtime(true) >= $deadline) {
             $timedOut = true;
             $Signal(15);
             $termDeadline = microtime(true) + 2.0;
-            do {
+            while ($running && microtime(true) < $termDeadline) {
                usleep(10_000);
                $running = $Poll();
-            } while ($running && microtime(true) < $termDeadline);
+            }
 
             if ($running) {
                $Signal(9);
                $killDeadline = microtime(true) + 2.0;
-               do {
+               while ($running && microtime(true) < $killDeadline) {
                   usleep(10_000);
                   $running = $Poll();
-               } while ($running && microtime(true) < $killDeadline);
+               }
             }
 
             if ($running) {
@@ -352,6 +382,7 @@ return new class extends Runner
          }
 
          usleep(10_000);
+         $running = $Poll();
       }
 
       return $timedOut

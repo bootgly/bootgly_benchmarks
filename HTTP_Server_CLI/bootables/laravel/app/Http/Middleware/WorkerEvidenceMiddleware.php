@@ -22,6 +22,7 @@ final class WorkerEvidenceMiddleware
         $Response = $Next($Request);
         $identity = WorkerEvidence::identify(
             $Request->headers->get('X-Bootgly-Benchmark-Warmup'),
+            $Request->headers->get('X-Bootgly-Benchmark-Nonce'),
             $Request->headers->get('X-Bootgly-Benchmark-Seal'),
         );
         if ($identity !== null) {

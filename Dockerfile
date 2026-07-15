@@ -90,10 +90,14 @@ RUN if [ "$WITH_HYPERF" = "1" ]; then set -eux; \
       cd "$BOOTABLES/hyperf"; composer install --no-interaction --no-progress; \
     fi
 
-# ! FrankenPHP — single Go binary
+# ! FrankenPHP — pinned linux/amd64 standalone binary. Verify the release asset
+#   before installing it so a mutable or corrupted download cannot enter a
+#   benchmark image unnoticed.
 RUN if [ "$WITH_FRANKENPHP" = "1" ]; then set -eux; \
-      curl -fsSL https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64 \
+      curl -fsSL https://github.com/php/frankenphp/releases/download/v1.12.4/frankenphp-linux-x86_64 \
         -o /usr/local/bin/frankenphp; \
+      echo '4868ea3260a661f8abb881e92e7c713bc93c8f6676f9034b9d9b4551fcf19670  /usr/local/bin/frankenphp' \
+        | sha256sum -c -; \
       chmod +x /usr/local/bin/frankenphp; \
     fi
 
@@ -130,6 +134,13 @@ RUN if [ "$WITH_LARAVEL_OCTANE" = "1" ]; then set -eux; \
     fi
 
 # # Entrypoint
+# ! PID 1 must reap orphaned opponent descendants. Keep this late in the image
+#   so lifecycle hardening does not invalidate the expensive opponent layers.
+RUN set -eux; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends tini; \
+      rm -rf /var/lib/apt/lists/*
+
 # ! Boot + seed a local PostgreSQL (trust auth) so every DB route works with zero
 #   host setup, then hand off to the bootgly CLI. --no-sync: this is a throwaway
 #   bench database, so skip fsync (also avoids an initdb fsync storm on overlayfs).
@@ -165,5 +176,9 @@ fi
 exec bootgly "$@"
 EOF
 
-ENTRYPOINT ["/usr/local/bin/bench-entrypoint.sh"]
+# ! Keep a real PID 1 reaper around the benchmark supervisor. Opponent wrappers
+#   intentionally create isolated sessions; if one of their leaders crashes,
+#   tini adopts and reaps the orphaned descendants instead of leaving zombies
+#   that make a quiescence check observe the process group forever.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/bench-entrypoint.sh"]
 CMD ["help"]

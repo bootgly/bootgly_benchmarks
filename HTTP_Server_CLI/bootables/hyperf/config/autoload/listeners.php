@@ -1,8 +1,8 @@
 <?php
-/**
- * Listener config for Hyperf benchmark — none needed.
- */
+/** Worker-lifecycle listeners for the Hyperf benchmark. */
 
 declare(strict_types=1);
 
-return [];
+return [
+   App\WorkerEvidenceListener::class,
+];

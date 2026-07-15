@@ -7,6 +7,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/db'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['"id":', '"randomNumber":'],

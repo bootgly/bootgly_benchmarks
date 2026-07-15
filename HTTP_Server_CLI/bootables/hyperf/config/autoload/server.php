@@ -35,6 +35,7 @@ return [
    ],
    'settings' => [
       Constant::OPTION_WORKER_NUM       => $workers,
+      Constant::OPTION_TASK_WORKER_NUM  => 0,
       Constant::OPTION_DAEMONIZE        => (bool) (getenv('SERVER_DAEMONIZE') ?: false),
       Constant::OPTION_LOG_FILE         => $logFile,
       Constant::OPTION_LOG_LEVEL        => SWOOLE_LOG_ERROR,

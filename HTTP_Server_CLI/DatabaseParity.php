@@ -24,17 +24,20 @@ final class DatabaseParity
     */
    public static function normalize (string $loadSet): null|string
    {
-      if (getenv('BENCHMARK_HELP') === '1' || $loadSet !== 'techempower') {
+      if (
+         getenv('BENCHMARK_HELP') === '1'
+         || ($loadSet !== 'techempower' && $loadSet !== 'benchmark')
+      ) {
          return null;
       }
 
       $poolMax = getenv('DB_POOL_MAX');
-      if ($poolMax === false || $poolMax === '') {
+      if (($poolMax === false || $poolMax === '') && $loadSet === 'techempower') {
          $poolMax = '1';
          putenv("DB_POOL_MAX={$poolMax}");
       }
 
-      return $poolMax;
+      return $poolMax === false || $poolMax === '' ? null : $poolMax;
    }
 
    /**
@@ -66,6 +69,13 @@ final class DatabaseParity
    ): null|int
    {
       if ($poolMax === null) {
+         if (self::select($Configs)) {
+            throw new InvalidArgumentException(
+               'Worker-aware database readiness for benchmark loads requires '
+               . 'an explicit DB_POOL_MAX=1.'
+            );
+         }
+
          return null;
       }
 
@@ -89,6 +99,13 @@ final class DatabaseParity
 
       // # Canonicalize what every subsequently spawned server receives.
       putenv("DB_POOL_MAX={$effective}");
+
+      if (self::prove($Configs) && $effective !== 1) {
+         throw new InvalidArgumentException(
+            'Worker-aware database readiness currently '
+            . "supports only DB_POOL_MAX=1; received {$effective}."
+         );
+      }
 
       if (self::check($Configs) === false) {
          return $effective;
@@ -145,5 +162,49 @@ final class DatabaseParity
       }
 
       return $effective;
+   }
+
+   /** Whether the Bootgly-only benchmark selection includes a database load. */
+   private static function select (Configs $Configs): bool
+   {
+      if ($Configs->loadSet !== 'benchmark') {
+         return false;
+      }
+
+      if (
+         $Configs->opponents !== null
+         && in_array(
+            'bootgly',
+            array_map(Configs::slug(...), $Configs->opponents),
+            true,
+         ) === false
+      ) {
+         return false;
+      }
+
+      if ($Configs->loads === null) {
+         return true;
+      }
+
+      return array_intersect($Configs->loads, range(10, 18)) !== [];
+   }
+
+   /** Whether the selected load requires live database-slot readiness proof. */
+   private static function prove (Configs $Configs): bool
+   {
+      if ($Configs->loadSet === 'benchmark') {
+         return self::select($Configs);
+      }
+      if ($Configs->loadSet !== 'techempower') {
+         return false;
+      }
+
+      if ($Configs->loads === null) {
+         return true;
+      }
+
+      // `cached-queries` (7) is served from a per-worker in-memory dataset and
+      // deliberately has no live database resource declaration.
+      return array_intersect($Configs->loads, [3, 4, 5, 6]) !== [];
    }
 }

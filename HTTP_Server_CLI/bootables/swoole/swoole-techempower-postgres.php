@@ -324,6 +324,7 @@ if ($PIDFile !== null) {
 $Server->set($settings);
 
 $Server->on('workerStart', static function (): void {
+   WorkerEvidence::boot();
    SwooleDatabaseBenchmark::init();
    // @ Prime the per-worker in-memory CachedWorld pool for /cached-queries.
    SwooleDatabaseBenchmark::primeCache();
@@ -333,6 +334,7 @@ $Server->on('request', static function (Request $Request, Response $Response): v
    if (WorkerEvidence::$enabled) {
       $identity = WorkerEvidence::identify(
          $Request->header['x-bootgly-benchmark-warmup'] ?? null,
+         $Request->header['x-bootgly-benchmark-nonce'] ?? null,
          $Request->header['x-bootgly-benchmark-seal'] ?? null,
       );
       if ($identity !== null) {

@@ -28,7 +28,7 @@ use Bootgly\Benchmarks\Runners\ServerCapture;
 
 require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
 
-$bootablesDir = realpath(__DIR__ . '/../../bootables/frankenphp');
+$bootablesDir = realpath(__DIR__ . '/bootable');
 
 $port = getenv('BENCHMARK_PORT') ?: '8082';
 $workers = getenv('BOOTGLY_WORKERS') ?: (string) max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));

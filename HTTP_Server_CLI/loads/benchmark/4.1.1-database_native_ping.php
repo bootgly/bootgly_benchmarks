@@ -7,6 +7,9 @@
 return [
    'method' => 'GET',
    'paths' => ['/database/native/ping'],
+   'readiness' => [
+      'resources' => ['database'],
+   ],
    'expect' => [
       'status' => 200,
       'contains' => ['"ok":1'],

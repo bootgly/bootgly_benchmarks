@@ -2,25 +2,23 @@
 
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Opponent;
+use Bootgly\ACI\Tests\Suite\Test\Specification;
 use Bootgly\Benchmarks\HTTP_Server_CLI\DatabaseParity;
 
 
-$framework = dirname(__DIR__, 3) . '/bootgly/Bootgly';
-require_once "{$framework}/ABI/Data/__String/Escapeable.php";
-require_once "{$framework}/ABI/Data/__String/Escapeable/Text.php";
-require_once "{$framework}/ABI/Data/__String/Escapeable/Text/Formattable.php";
-require_once "{$framework}/ACI/Tests/Benchmark/Configs.php";
-require_once "{$framework}/ACI/Tests/Benchmark/Opponent.php";
-require_once "{$framework}/ACI/Tests/Benchmark/Runner.php";
 require_once dirname(__DIR__, 2) . '/HTTP_Server_CLI/DatabaseParity.php';
 
+return new Specification(
+   description: 'It should enforce the HTTP server database comparability contract',
+   test: static function (): bool
+   {
 $environment = [
    'BENCHMARK_HELP' => getenv('BENCHMARK_HELP'),
    'DB_POOL_MAX' => getenv('DB_POOL_MAX'),
 ];
 $Check = static function (bool $condition, string $message): void {
    if ($condition === false) {
-      throw new RuntimeException($message);
+      throw new AssertionError($message);
    }
 };
 $Make = static function (array $names): array {
@@ -42,7 +40,7 @@ $ExpectFailure = static function (callable $Callback, string $fragment) use ($Ch
       return;
    }
 
-   throw new RuntimeException("Parity validation unexpectedly accepted: {$fragment}");
+   throw new AssertionError("Parity validation unexpectedly accepted: {$fragment}");
 };
 
 try {
@@ -86,9 +84,18 @@ try {
       'opponents' => 'bootgly,swoole,amphp,reactphp,hyperf',
       'loads' => 'techempower:3',
    ]);
+   $ExpectFailure(
+      static fn () => DatabaseParity::validate($Configs, $PoolAware, $poolMax),
+      'supports only DB_POOL_MAX=1',
+   );
+
+   $Configs = Configs::parse([
+      'opponents' => 'bootgly,swoole',
+      'loads' => 'techempower:7',
+   ]);
    $Check(
-      DatabaseParity::validate($Configs, $PoolAware, $poolMax) === 2,
-      'A pool-aware-only selection did not accept DB_POOL_MAX=2.',
+      DatabaseParity::validate($Configs, $Make(['Bootgly', 'Swoole']), $poolMax) === 2,
+      'The in-memory cached-queries load was incorrectly treated as live pool-slot proof.',
    );
 
    foreach (['Workerman', 'RoadRunner', 'FrankenPHP', 'Laravel (Octane)'] as $name) {
@@ -98,7 +105,7 @@ try {
       ]);
       $ExpectFailure(
          static fn () => DatabaseParity::validate($Configs, $Make([$name]), '2'),
-         $name,
+         'supports only DB_POOL_MAX=1',
       );
    }
 
@@ -136,10 +143,52 @@ try {
       'A non-DB selection was incorrectly rejected by the DB capability policy.',
    );
 
+   putenv('DB_POOL_MAX');
+   $Check(
+      DatabaseParity::normalize('benchmark') === null && getenv('DB_POOL_MAX') === false,
+      'An omitted benchmark DB_POOL_MAX was materialized before load selection.',
+   );
+
+   $Configs = Configs::parse([
+      'opponents' => 'bootgly',
+      'loads' => 'benchmark:10',
+   ]);
+   $ExpectFailure(
+      static fn () => DatabaseParity::validate($Configs, $Make(['Bootgly']), null),
+      'explicit DB_POOL_MAX=1',
+   );
+   $ExpectFailure(
+      static fn () => DatabaseParity::validate($Configs, $Make(['Bootgly']), '2'),
+      'supports only DB_POOL_MAX=1',
+   );
+   $Check(
+      DatabaseParity::validate($Configs, $Make(['Bootgly']), '1') === 1,
+      'A benchmark DB load rejected the only currently attestable pool ceiling.',
+   );
+
+   foreach (['benchmark:10', 'benchmark:*'] as $loads) {
+      $Configs = Configs::parse([
+         'opponents' => 'swoole',
+         'loads' => $loads,
+      ]);
+      $Check(
+         DatabaseParity::validate($Configs, $Make(['Swoole']), null) === null,
+         "A {$loads} selection without Bootgly incorrectly required its DB resource contract.",
+      );
+   }
+
    putenv('DB_POOL_MAX=7');
    $Check(
-      DatabaseParity::normalize('benchmark') === null && getenv('DB_POOL_MAX') === '7',
-      'The Bootgly-only benchmark set was modified by the cross-framework policy.',
+      DatabaseParity::normalize('benchmark') === '7' && getenv('DB_POOL_MAX') === '7',
+      'An explicit benchmark DB_POOL_MAX was not retained for validation.',
+   );
+   $Configs = Configs::parse([
+      'opponents' => 'bootgly',
+      'loads' => 'benchmark:1,2',
+   ]);
+   $Check(
+      DatabaseParity::validate($Configs, $Make(['Bootgly']), '7') === 7,
+      'A non-DB benchmark selection was constrained by resource attestation.',
    );
 
    foreach (['TCP_Client.php', 'HTTP_Client.php'] as $runnerFile) {
@@ -161,11 +210,13 @@ try {
          "{$runnerFile} did not expose validated DB comparability.",
       );
    }
+
+   return true;
 }
 finally {
    foreach ($environment as $name => $value) {
       $value === false ? putenv($name) : putenv("{$name}={$value}");
    }
 }
-
-fwrite(STDOUT, "HTTP server DB parity proof: OK\n");
+   },
+);

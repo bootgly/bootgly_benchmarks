@@ -1,0 +1,18 @@
+{
+	admin off
+}
+
+http://:{$FRANKENPHP_PORT} {
+	log {
+		output discard
+	}
+
+	root * {$FRANKENPHP_DIR}
+
+	php_server {
+		worker {
+			file index.php
+			num {$FRANKENPHP_NUM_WORKERS}
+		}
+	}
+}

@@ -8,9 +8,11 @@
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Runner;
 use Bootgly\Benchmarks\HTTP_Server_CLI\DatabaseParity;
+use Bootgly\Benchmarks\Runners\WorkerSweep;
 
 
 require_once __DIR__ . '/DatabaseParity.php';
+require_once __DIR__ . '/../runners/WorkerSweep.php';
 
 // @ Select runner based on environment variable
 $runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'tcp_client');
@@ -88,23 +90,28 @@ $loadDir = match ($loadSet) {
 $Runner->load(__DIR__ . $loadDir);
 
 // @ Auto-register opponents — each folder self-registers via its own autoboot.php
-foreach (glob(__DIR__ . '/opponents/*/autoboot.php') as $opponentFile) {
+$opponentFiles = glob(__DIR__ . '/opponents/*/autoboot.php');
+foreach ($opponentFiles === false ? [] : $opponentFiles as $opponentFile) {
    require $opponentFile;
 }
 
 // ! Resolve and prove the effective DB ceiling only after TestCommand knows
 //   the concrete opponent/load selection, but before it publishes the resolved
 //   manifest config, renders the banner, or starts a measured process.
-$Runner->Validator = static function (Runner $Runner, Configs $Configs) use ($poolMax): void {
+$Runner->Validator = static function (
+   Runner $Runner,
+   Configs $Configs,
+   array $rounds = [],
+) use ($poolMax): void {
    $effective = DatabaseParity::validate($Configs, $Runner->opponents, $poolMax);
-   if ($effective === null) {
-      return;
+   if ($effective !== null) {
+      $Runner->meta['db-pool-max'] = $effective;
+      if (DatabaseParity::check($Configs)) {
+         $Runner->meta['db-pool-comparability'] = DatabaseParity::CONTRACT;
+      }
    }
 
-   $Runner->meta['db-pool-max'] = $effective;
-   if (DatabaseParity::check($Configs)) {
-      $Runner->meta['db-pool-comparability'] = DatabaseParity::CONTRACT;
-   }
+   WorkerSweep::validate($Runner, $Configs, $rounds);
 };
 
 return $Runner;

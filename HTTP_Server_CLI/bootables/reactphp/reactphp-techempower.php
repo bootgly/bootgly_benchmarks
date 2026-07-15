@@ -84,6 +84,8 @@ exit(0);
  */
 function serve (string $host, int $port): void
 {
+   WorkerEvidence::boot();
+
    // ! Per-worker PgAsync client — created AFTER fork so each child owns its
    //   own connection bound to its own (global) React loop.
    $pass = getenv('DB_PASS');
@@ -123,32 +125,43 @@ function serve (string $host, int $port): void
 
    // @ Async request handler — returns a Response or a Promise<Response>.
    $Server = new HttpServer(static function (ServerRequestInterface $Request) use ($Client, &$CachedWorlds): mixed {
-      $headers = [];
+      $identity = null;
       if (WorkerEvidence::$enabled) {
          $identity = WorkerEvidence::identify(
             $Request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $Request->getHeaderLine('X-Bootgly-Benchmark-Nonce'),
             $Request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
          );
-         if ($identity !== null) {
-            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
-         }
       }
 
       $path = $Request->getUri()->getPath();
 
       // ? TechEmpower /plaintext + /json: static, no DB. Handle early.
       if ($path === '/plaintext') {
-         return new Response(200, $headers + ['Content-Type' => 'text/plain'], 'Hello, World!');
+         return new Response(200, $identity === null
+            ? ['Content-Type' => 'text/plain']
+            : [
+               'Content-Type' => 'text/plain',
+               'X-Bootgly-Benchmark-Worker' => $identity,
+            ], 'Hello, World!');
       }
       if ($path === '/json') {
-         return new Response(200, $headers + ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}');
+         return new Response(200, $identity === null
+            ? ['Content-Type' => 'application/json']
+            : [
+               'Content-Type' => 'application/json',
+               'X-Bootgly-Benchmark-Worker' => $identity,
+            ], '{"message":"Hello, World!"}');
       }
 
       try {
          switch ($path) {
             case '/db':
                return fetchWorld($Client, mt_rand(1, 10000))->then(
-                  static fn (array $World): Response => json(json_encode($World, JSON_NUMERIC_CHECK) ?: '{}', $headers)
+                  static fn (array $World): Response => json(
+                     json_encode($World, JSON_NUMERIC_CHECK) ?: '{}',
+                     $identity,
+                  )
                );
 
             case '/query':
@@ -159,7 +172,10 @@ function serve (string $host, int $port): void
                }
 
                return all($Promises)->then(
-                  static fn (array $Worlds): Response => json(json_encode(array_values($Worlds), JSON_NUMERIC_CHECK) ?: '[]', $headers)
+                  static fn (array $Worlds): Response => json(
+                     json_encode(array_values($Worlds), JSON_NUMERIC_CHECK) ?: '[]',
+                     $identity,
+                  )
                );
 
             case '/fortunes':
@@ -167,7 +183,7 @@ function serve (string $host, int $port): void
                   ->query('SELECT id, message FROM Fortune')
                   ->toArray()
                   ->toPromise()
-                  ->then(static function (array $rows) use ($headers): Response {
+                  ->then(static function (array $rows) use ($identity): Response {
                      $Fortunes = [0 => 'Additional fortune added at request time.'];
                      foreach ($rows as $row) {
                         $Fortunes[(int) $row['id']] = (string) $row['message'];
@@ -182,7 +198,12 @@ function serve (string $host, int $port): void
 
                      $body = "<!DOCTYPE html><html><head><title>Fortunes</title></head><body><table><tr><th>id</th><th>message</th></tr>{$html}</table></body></html>";
 
-                     return new Response(200, $headers + ['Content-Type' => 'text/html; charset=utf-8'], $body);
+                     return new Response(200, $identity === null
+                        ? ['Content-Type' => 'text/html; charset=utf-8']
+                        : [
+                           'Content-Type' => 'text/html; charset=utf-8',
+                           'X-Bootgly-Benchmark-Worker' => $identity,
+                        ], $body);
                   });
 
             case '/updates':
@@ -196,14 +217,14 @@ function serve (string $host, int $port): void
                   });
                }
 
-               return all($Promises)->then(static function (array $Worlds) use ($Client, $headers): PromiseInterface {
+               return all($Promises)->then(static function (array $Worlds) use ($Client, $identity): PromiseInterface {
                   $Worlds = array_values($Worlds);
 
                   // @ ONE batched write: UPDATE World SET randomNumber =
                   //   CASE id WHEN $n::integer THEN $n::integer ... END
                   //   WHERE id IN ($n::integer, ...).
                   if ($Worlds === []) {
-                     return resolve(json('[]', $headers));
+                     return resolve(json('[]', $identity));
                   }
 
                   $cases = [];
@@ -226,32 +247,50 @@ function serve (string $host, int $port): void
                      ->executeStatement($sql, $parameters)
                      ->toArray()
                      ->toPromise()
-                     ->then(static fn (): Response => json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]', $headers));
+                     ->then(static fn (): Response => json(
+                        json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]',
+                        $identity,
+                     ));
                });
 
             case '/cached-queries':
                $count = clamp(query_param($Request, 'count'));
                $max = count($CachedWorlds);
                if ($max === 0) {
-                  return json('[]', $headers);
+                  return json('[]', $identity);
                }
                $Worlds = [];
                while ($count-- > 0) {
                   $Worlds[] = $CachedWorlds[mt_rand(1, $max)] ?? null;
                }
 
-               return json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]', $headers);
+               return json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]', $identity);
 
             case '/':
                // Warmup/probe — the runner warms up with GET /.
-               return new Response(200, $headers + ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark');
+               return new Response(200, $identity === null
+                  ? ['Content-Type' => 'text/plain']
+                  : [
+                     'Content-Type' => 'text/plain',
+                     'X-Bootgly-Benchmark-Worker' => $identity,
+                  ], 'TechEmpower Benchmark');
 
             default:
-               return new Response(404, $headers + ['Content-Type' => 'text/plain'], 'Not Found');
+               return new Response(404, $identity === null
+                  ? ['Content-Type' => 'text/plain']
+                  : [
+                     'Content-Type' => 'text/plain',
+                     'X-Bootgly-Benchmark-Worker' => $identity,
+                  ], 'Not Found');
          }
       }
       catch (Throwable $Throwable) {
-         return new Response(500, $headers + ['Content-Type' => 'text/plain'], $Throwable->getMessage());
+         return new Response(500, $identity === null
+            ? ['Content-Type' => 'text/plain']
+            : [
+               'Content-Type' => 'text/plain',
+               'X-Bootgly-Benchmark-Worker' => $identity,
+            ], $Throwable->getMessage());
       }
    });
 
@@ -312,7 +351,13 @@ function query_param (ServerRequestInterface $Request, string $name): mixed
 /**
  * application/json response shortcut.
  */
-function json (string $body, array $headers): Response
+function json (string $body, ?string $identity = null): Response
 {
-   return new Response(200, $headers + ['Content-Type' => 'application/json'], $body);
+   $headers = ['Content-Type' => 'application/json'];
+
+   if ($identity !== null) {
+      $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+   }
+
+   return new Response(200, $headers, $body);
 }

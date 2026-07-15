@@ -67,7 +67,7 @@ $exit = match ($action) {
       return ServerCapture::run(
          "cd {$bootablesDir} && {$db}APP_ENV=production XDEBUG_MODE=off "
          . "php artisan octane:start --server=swoole --host=0.0.0.0 "
-         . "--port={$port} --workers={$workers} --max-requests=100000000"
+         . "--port={$port} --workers={$workers} --task-workers=0 --max-requests=100000000"
       );
    })(),
 

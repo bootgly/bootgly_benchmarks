@@ -176,6 +176,8 @@ PHP;
       }
 
       foreach ($command as $argument) {
+         // Public input remains guarded even though the PHPDoc narrows it for callers.
+         // @phpstan-ignore function.alreadyNarrowedType
          if (!\is_string($argument)) {
             throw new RuntimeException('Benchmark subprocess arguments must be strings.');
          }
@@ -199,6 +201,8 @@ PHP;
          2 => ['file', $stderrCapture, 'xb'],
       ];
       $inherited = \getenv();
+      // Keep the runtime fallback for PHP/environment variants that may fail here.
+      // @phpstan-ignore function.alreadyNarrowedType
       $inherited = \is_array($inherited) ? $inherited : [];
 
       foreach ($environment as $name => $value) {
@@ -244,14 +248,13 @@ PHP;
       }
 
       $status = \proc_get_status($process);
-      $PID = \is_array($status) && isset($status['pid']) ? (int) $status['pid'] : null;
+      $PID = $status['pid'];
       $groupDeadline = \microtime(true) + 2.0;
       $groupStarted = false;
 
       do {
          if (
-            $PID !== null
-            && \is_file($groupReady)
+            \is_file($groupReady)
             && \trim((string) @\file_get_contents($groupReady)) === (string) $PID
          ) {
             $groupStarted = true;
@@ -259,7 +262,7 @@ PHP;
          }
 
          $status = \proc_get_status($process);
-         if (!\is_array($status) || !$status['running']) {
+         if (!$status['running']) {
             break;
          }
 
@@ -269,7 +272,7 @@ PHP;
       @\unlink($groupReady . '.tmp');
       @\unlink($groupReady);
 
-      if (!$groupStarted || $PID === null) {
+      if (!$groupStarted) {
          @\proc_terminate($process, 9);
          $closedExit = \proc_close($process);
 
@@ -303,10 +306,15 @@ PHP;
       );
    }
 
-   /** @param list<string> $command @return list<string> */
+   /**
+    * @param list<string> $command
+    * @return list<string>
+    */
    public static function isolate (array $command): array
    {
-      foreach (['pcntl_exec', 'posix_kill', 'posix_setsid'] as $function) {
+      foreach (['pcntl_exec', 'pcntl_waitpid', 'posix_kill', 'posix_setsid'] as $function) {
+         // Availability is a runtime requirement; PHPStan sees the local build only.
+         // @phpstan-ignore function.alreadyNarrowedType
          if (!\function_exists($function)) {
             throw new RuntimeException("Benchmark process-group isolation requires {$function}().");
          }
@@ -321,7 +329,10 @@ PHP;
       ];
    }
 
-   /** @param list<string> $arguments @return list<string> */
+   /**
+    * @param list<string> $arguments
+    * @return list<string>
+    */
    public static function redact (array $arguments): array
    {
       $redacted = [];
@@ -365,7 +376,14 @@ PHP;
    /**
     * @param list<string> $command
     *
-    * @return array{exit:int,stdout:string,stderr:string}
+    * @return array{
+    *    exit:int,
+    *    stdout:string,
+    *    stderr:string,
+    *    timed_out:bool,
+    *    state:string,
+    *    signal:int|null
+    * }
     */
    public function run (
       array $command,
@@ -402,6 +420,7 @@ PHP;
             $Iterator = new \RecursiveIteratorIterator($Children, \RecursiveIteratorIterator::CHILD_FIRST);
 
             foreach ($Iterator as $Child) {
+               /** @var \SplFileInfo $Child */
                $Child->isDir() ? @\rmdir($Child->getPathname()) : @\unlink($Child->getPathname());
             }
 
@@ -433,7 +452,7 @@ final class RunProcess
    private readonly string $stdout;
    private readonly string $stderr;
    private readonly float $started;
-   private readonly ?int $PID;
+   private readonly int $PID;
    private readonly int $PGID;
    private ?int $observedExit = null;
    private ?int $signal = null;
@@ -467,9 +486,7 @@ final class RunProcess
       $this->PGID = $PGID;
       $this->started = \microtime(true);
       $status = \proc_get_status($process);
-      $this->PID = \is_array($status) && isset($status['pid'])
-         ? (int) $status['pid']
-         : null;
+      $this->PID = $status['pid'];
       $this->inspect($status);
 
       try {
@@ -506,7 +523,7 @@ final class RunProcess
       $status = \proc_get_status($this->process);
       $this->inspect($status);
 
-      return \is_array($status) && $status['running'];
+      return $status['running'];
    }
 
    /**
@@ -655,18 +672,29 @@ final class RunProcess
       ];
    }
 
-   /** @param array<string,mixed>|false $status */
-   private function inspect (array|false $status): void
+   /**
+    * @param array{
+    *    command:string,
+    *    pid:int,
+    *    running:bool,
+    *    signaled:bool,
+    *    stopped:bool,
+    *    exitcode:int,
+    *    termsig:int,
+    *    stopsig:int
+    * } $status
+    */
+   private function inspect (array $status): void
    {
-      if (!\is_array($status) || $status['running']) {
+      if ($status['running']) {
          return;
       }
 
-      if (isset($status['exitcode']) && $status['exitcode'] >= 0) {
-         $this->observedExit ??= (int) $status['exitcode'];
+      if ($status['exitcode'] >= 0) {
+         $this->observedExit ??= $status['exitcode'];
       }
-      if (($status['signaled'] ?? false) && isset($status['termsig'])) {
-         $this->signal ??= (int) $status['termsig'];
+      if ($status['signaled']) {
+         $this->signal ??= $status['termsig'];
       }
    }
 
@@ -677,17 +705,25 @@ final class RunProcess
    private function poll (): bool
    {
       if (\is_resource($this->process)) {
-         $status = \proc_get_status($this->process);
+         $process = $this->process;
+         $status = \proc_get_status($process);
          $this->inspect($status);
 
-         if (\is_array($status) && $status['running']) {
+         if ($status['running']) {
             return true;
          }
 
-         $closedExit = \proc_close($this->process);
+         $closedExit = \proc_close($process);
          $this->process = null;
          $this->observedExit ??= $closedExit >= 0 ? $closedExit : null;
       }
+
+      // A containerized PHP PID 1 adopts orphaned descendants. Limit reaping
+      // to this exact process group so unrelated benchmark children remain
+      // owned by their respective supervisors.
+      do {
+         $reaped = \pcntl_waitpid(-$this->PGID, $childStatus, \WNOHANG);
+      } while ($reaped > 0);
 
       return @\posix_kill(-$this->PGID, 0);
    }

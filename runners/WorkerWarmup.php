@@ -3,9 +3,9 @@
  * --------------------------------------------------------------------------
  * Bootgly Benchmarks — worker-aware HTTP warmup evidence
  * --------------------------------------------------------------------------
- * Proves that the selected load reaches the expected server-worker set in two
- * independent connection-close rounds, then validates the sustained TCP
- * worker's closed accounting before a measured run may start.
+ * Proves the complete selected-path/server-worker matrix in two independent
+ * connection-close rounds, seals the exact worker set, then validates the
+ * sustained TCP worker's closed accounting before a measured run may start.
  * --------------------------------------------------------------------------
  */
 
@@ -27,13 +27,105 @@ final class WorkerWarmupFailure extends \RuntimeException
 }
 
 
+/**
+ * @phpstan-type NonceLedger array{
+ *    algorithm:string,
+ *    issued:int,
+ *    bound:int,
+ *    replayed:int
+ * }
+ * @phpstan-type Proof array{
+ *    index:int,
+ *    requests:int,
+ *    responses:int,
+ *    unmarked:int,
+ *    failures:array<string,int>,
+ *    statuses:array<int,int>,
+ *    path_requests:array<string,int>,
+ *    path_responses:array<string,int>,
+ *    workers:list<string>,
+ *    worker_paths:array<string,array<string,int>>,
+ *    cells_expected:int,
+ *    cells_covered:int,
+ *    nonce:NonceLedger,
+ *    elapsed:float,
+ *    sealed:bool,
+ *    complete:bool
+ * }
+ * @phpstan-type ResourceEvidence array{
+ *    scope:string,
+ *    proof:string,
+ *    slots_expected_per_worker:?int,
+ *    slots_expected:?int,
+ *    slots_covered:int,
+ *    worker_slots:array<string,int>,
+ *    complete:bool
+ * }
+ * @phpstan-type Coverage array{
+ *    schema:string,
+ *    version:int,
+ *    method:string,
+ *    paths:list<string>,
+ *    declared_status:?int,
+ *    body_expectations:list<string>,
+ *    workers_expected:int,
+ *    connection:string,
+ *    cache_bypass:string,
+ *    plan:array<string,mixed>,
+ *    rounds:list<Proof>,
+ *    requests:int,
+ *    responses:int,
+ *    failures:array<string,int>,
+ *    statuses:array<int,int>,
+ *    path_requests:array<string,int>,
+ *    path_responses:array<string,int>,
+ *    workers:list<string>,
+ *    worker_paths:array<string,array<string,int>>,
+ *    cells_expected:int,
+ *    cells_covered:int,
+ *    nonce:NonceLedger,
+ *    resources:array<string,ResourceEvidence>,
+ *    stable:bool,
+ *    sealed:bool,
+ *    seal:?Proof,
+ *    complete:bool,
+ *    elapsed:float
+ * }
+ * @phpstan-type Traffic array{
+ *    elapsed:float,
+ *    rps:float,
+ *    latency:?string,
+ *    transfer:string,
+ *    scheduled:int,
+ *    sent:int,
+ *    responses:int,
+ *    informational:int,
+ *    outstanding:int,
+ *    failed:int,
+ *    write_failed:int,
+ *    connection_failed:int,
+ *    partial_writes:int,
+ *    accounting:true,
+ *    statuses:array<int,int>,
+ *    failures:array<string,int>,
+ *    write_failures:array<string,int>
+ * }
+ */
 final class WorkerWarmup
 {
+   public const int AUTO_MATRIX_CELLS = 4_096;
+   public const string SCHEDULER = 'active-path-v1';
+
    public const REQUEST_HEADER = 'X-Bootgly-Benchmark-Warmup';
+   public const NONCE_HEADER = 'X-Bootgly-Benchmark-Nonce';
    public const SEAL_HEADER = 'X-Bootgly-Benchmark-Seal';
    public const RESPONSE_HEADER = 'X-Bootgly-Benchmark-Worker';
 
    private const MAX_RESPONSE_BYTES = 16_777_216;
+   private const MAX_PROOF_BUDGET = 3_600.0;
+   private const ATTEMPT_FACTOR = 16;
+   /** Automatic allowance added for each minimum-request concurrency wave. */
+   private const AUTO_SECONDS_PER_WAVE = 0.5;
    /** Scheduler/clock boundary allowed below the requested traffic window. */
    private const EARLY_ELAPSED_TOLERANCE = 0.25;
    /** One terminal-drain tick plus modest scheduler delay above the window. */
@@ -68,6 +160,145 @@ final class WorkerWarmup
    }
 
    /**
+    * Plan one exact two-round worker/path proof and its final worker seal.
+    *
+    * Automatic time budgets are deliberately limited to a bounded matrix.
+    * Larger matrices require an explicit operator-selected budget; neither
+    * mode weakens the complete observed-coverage requirement in probe().
+    *
+    * @param array<string,mixed> $load Included load configuration.
+    *
+    * @return array{
+    *    schema:string,
+    *    version:int,
+    *    scheduler:string,
+    *    unique_paths:int,
+    *    workers:int,
+    *    cells:int,
+    *    matrix_attempts:int,
+    *    seal_attempts:int,
+    *    parallel:int,
+    *    budget_seconds:float,
+    *    budget_source:string,
+    *    auto_limit_cells:int
+    * }
+    */
+   public static function plan (
+      array $load,
+      int $workers,
+      mixed $budget = 'auto',
+      int $attempts = 0,
+      int $parallel = 0,
+   ): array
+   {
+      if ($workers < 1) {
+         throw new \InvalidArgumentException('Expected worker count must be positive.');
+      }
+      if ($attempts < 0) {
+         throw new \InvalidArgumentException('Warmup attempts cannot be negative.');
+      }
+      if ($parallel < 0) {
+         throw new \InvalidArgumentException('Warmup parallelism cannot be negative.');
+      }
+
+      $paths = self::select($load);
+      $pathCount = \count($paths);
+      if ($pathCount > \intdiv(\PHP_INT_MAX, $workers)) {
+         throw new \InvalidArgumentException('Warmup worker/path matrix is too large.');
+      }
+      $cells = $workers * $pathCount;
+
+      $workerParallel = $workers > 64 ? 128 : $workers * 2;
+      $parallel = $parallel > 0
+         ? $parallel
+         : \min(128, \max($workerParallel, $pathCount));
+
+      $source = 'explicit';
+      if ($budget === null || (\is_string($budget) && \strtolower($budget) === 'auto')) {
+         $source = 'auto';
+         if ($cells > self::AUTO_MATRIX_CELLS) {
+            throw new \InvalidArgumentException(
+               "Worker proof matrix {$workers}x{$pathCount}={$cells} cells exceeds "
+               . 'the automatic limit of ' . self::AUTO_MATRIX_CELLS
+               . '; pass --worker-proof-budget=SECONDS.',
+            );
+         }
+         if ($cells > \intdiv(\PHP_INT_MAX - $workers, 2)) {
+            throw new \InvalidArgumentException('Warmup minimum request count is too large.');
+         }
+         // # Two complete matrix rounds plus one seal acknowledgement per
+         //   worker are the minimum useful requests. Scale the automatic
+         //   allowance by concurrency waves so a path-heavy boundary does not
+         //   receive the same deadline as a one-cell proof. This is a bounded
+         //   scheduling policy, not a throughput guarantee.
+         $minimumRequests = ($cells * 2) + $workers;
+         $waves = (int) \ceil($minimumRequests / $parallel);
+         $budgetSeconds = \min(
+            self::MAX_PROOF_BUDGET,
+            \max(10.0, 5.0 + ($waves * self::AUTO_SECONDS_PER_WAVE)),
+         );
+      }
+      else {
+         if (\is_int($budget) || \is_float($budget)) {
+            $budgetSeconds = (float) $budget;
+         }
+         else if (
+            \is_string($budget)
+            && \preg_match('/\A(?:0|[1-9]\d*)(?:\.\d+)?\z/D', $budget) === 1
+         ) {
+            $budgetSeconds = (float) $budget;
+         }
+         else {
+            throw new \InvalidArgumentException(
+               'Worker proof budget must be auto or a positive number of seconds.',
+            );
+         }
+         if (
+            !\is_finite($budgetSeconds)
+            || $budgetSeconds <= 0
+            || $budgetSeconds > self::MAX_PROOF_BUDGET
+         ) {
+            throw new \InvalidArgumentException(
+               'Worker proof budget must be finite and between 0 and 3600 seconds.',
+            );
+         }
+      }
+
+      if ($workers > \intdiv(\PHP_INT_MAX, self::ATTEMPT_FACTOR)) {
+         throw new \InvalidArgumentException('Warmup seal attempt limit is too large.');
+      }
+      $sealAttempts = \max(64, $workers * self::ATTEMPT_FACTOR);
+
+      if ($attempts === 0) {
+         if ($cells > \intdiv(\PHP_INT_MAX, self::ATTEMPT_FACTOR)) {
+            throw new \InvalidArgumentException('Warmup matrix attempt limit is too large.');
+         }
+         $matrixAttempts = \max(64, $cells * self::ATTEMPT_FACTOR);
+      }
+      else {
+         if ($attempts < $cells) {
+            throw new \InvalidArgumentException('Warmup attempts cannot cover every worker/path cell.');
+         }
+         $matrixAttempts = $attempts;
+      }
+
+      return [
+         'schema' => 'bootgly.worker-proof-plan',
+         'version' => 1,
+         'scheduler' => self::SCHEDULER,
+         'unique_paths' => $pathCount,
+         'workers' => $workers,
+         'cells' => $cells,
+         'matrix_attempts' => $matrixAttempts,
+         'seal_attempts' => $sealAttempts,
+         'parallel' => $parallel,
+         'budget_seconds' => $budgetSeconds,
+         'budget_source' => $source,
+         'auto_limit_cells' => self::AUTO_MATRIX_CELLS,
+      ];
+   }
+
+   /**
     * Probe the selected HTTP load in two independent connection-close rounds.
     *
     * Every request carries both the warmup marker and an Authorization marker.
@@ -79,6 +310,7 @@ final class WorkerWarmup
     * fingerprints. The marker token and Authorization value are never returned.
     *
     * @param array<string,mixed> $load Included load configuration.
+    * @param ?int $effectivePoolSlots Explicit per-worker database pool size.
     *
     * @return array<string,mixed> Safe-to-persist coverage evidence.
     */
@@ -87,8 +319,9 @@ final class WorkerWarmup
       string $token,
       int $workers,
       int $attempts = 0,
-      float $budget = 10.0,
+      mixed $budget = 'auto',
       int $parallel = 0,
+      ?int $effectivePoolSlots = null,
    ): array
    {
       if (
@@ -98,12 +331,11 @@ final class WorkerWarmup
       ) {
          throw new \InvalidArgumentException('Warmup token must use a safe header-value alphabet.');
       }
-      if ($workers < 1) {
-         throw new \InvalidArgumentException('Expected worker count must be positive.');
-      }
-      if (!\is_finite($budget) || $budget <= 0) {
-         throw new \InvalidArgumentException('Warmup probe budget must be finite and positive.');
-      }
+      $plan = self::plan($load, $workers, $budget, $attempts, $parallel);
+      $budget = $plan['budget_seconds'];
+      $attempts = $plan['matrix_attempts'];
+      $sealAttempts = $plan['seal_attempts'];
+      $parallel = $plan['parallel'];
 
       $method = $load['method'] ?? 'GET';
       $paths = $load['paths'] ?? null;
@@ -123,21 +355,39 @@ final class WorkerWarmup
          throw new \InvalidArgumentException('Warmup load expectation must be an array.');
       }
 
-      $selected = [];
-      foreach ($paths as $path) {
-         if (
-            !\is_string($path)
-            || $path === ''
-            || $path[0] !== '/'
-            || \str_contains($path, "\r")
-            || \str_contains($path, "\n")
-            || \str_contains($path, $token)
-         ) {
-            throw new \InvalidArgumentException('Warmup load contains an unsafe path.');
-         }
-         $selected[$path] = true;
+      $readiness = $load['readiness'] ?? [];
+      if (!\is_array($readiness)) {
+         throw new \InvalidArgumentException('Warmup load readiness must be an array.');
       }
-      $paths = \array_keys($selected);
+      foreach (\array_keys($readiness) as $field) {
+         if ($field !== 'resources') {
+            throw new \InvalidArgumentException('Warmup load readiness contains an unsupported field.');
+         }
+      }
+      $resources = $readiness['resources'] ?? [];
+      if (!\is_array($resources) || !\array_is_list($resources)) {
+         throw new \InvalidArgumentException('Warmup readiness resources must be a list.');
+      }
+      $selectedResources = [];
+      foreach ($resources as $resource) {
+         if (!\is_string($resource) || $resource !== 'database') {
+            throw new \InvalidArgumentException('Warmup readiness resource is not supported.');
+         }
+         $selectedResources[$resource] = true;
+      }
+      $resources = \array_keys($selectedResources);
+      \sort($resources, \SORT_STRING);
+      if ($effectivePoolSlots !== null && $effectivePoolSlots < 1) {
+         throw new \InvalidArgumentException('Effective pool slot count must be positive.');
+      }
+      if (
+         $effectivePoolSlots !== null
+         && $effectivePoolSlots > \intdiv(\PHP_INT_MAX, $workers)
+      ) {
+         throw new \InvalidArgumentException('Effective pool slot matrix is too large.');
+      }
+
+      $paths = self::select($load, $token);
 
       $declared = $expect['status'] ?? null;
       if ($declared !== null && (!\is_int($declared) || $declared < 100 || $declared > 599)) {
@@ -156,23 +406,16 @@ final class WorkerWarmup
             throw new \InvalidArgumentException('Warmup body expectations must be non-empty strings.');
          }
       }
+      /** @var list<string> $contains */
+      $contains = \array_values($contains);
 
-      $minimum = \max($workers, \count($paths));
-      $attempts = $attempts > 0 ? $attempts : \max(64, $workers * 16, \count($paths) * 2);
-      if ($attempts < $minimum) {
-         throw new \InvalidArgumentException('Warmup attempts cannot cover all workers and paths.');
-      }
-      $parallel = $parallel > 0
-         ? $parallel
-         : \min(128, \max($workers * 2, \count($paths)));
-      if ($parallel < 1) {
-         throw new \InvalidArgumentException('Warmup parallelism must be positive.');
-      }
+      $pathCount = \count($paths);
+      $minimum = $plan['cells'];
 
       $started = \hrtime(true);
       $coverage = [
          'schema' => 'bootgly.worker-coverage',
-         'version' => 1,
+         'version' => 2,
          'method' => $method,
          'paths' => $paths,
          'declared_status' => $declared,
@@ -183,6 +426,7 @@ final class WorkerWarmup
          'workers_expected' => $workers,
          'connection' => 'close',
          'cache_bypass' => 'authorization-marker',
+         'plan' => $plan,
          'rounds' => [],
          'requests' => 0,
          'responses' => 0,
@@ -191,12 +435,43 @@ final class WorkerWarmup
          'path_requests' => \array_fill_keys($paths, 0),
          'path_responses' => \array_fill_keys($paths, 0),
          'workers' => [],
+         'worker_paths' => [],
+         'cells_expected' => $minimum,
+         'cells_covered' => 0,
+         'nonce' => [
+            'algorithm' => 'random-256',
+            'issued' => 0,
+            'bound' => 0,
+            'replayed' => 0,
+         ],
+         'resources' => [],
          'stable' => false,
          'sealed' => false,
          'seal' => null,
          'complete' => false,
          'elapsed' => 0.0,
       ];
+      /** @var Coverage $coverage */
+
+      if ($resources !== [] && $effectivePoolSlots !== 1) {
+         $coverage['failures']['pool_slot_attestation_unsupported'] = 1;
+         $coverage['resources']['database'] = [
+            'scope' => 'worker',
+            'proof' => 'selected-path',
+            'slots_expected_per_worker' => $effectivePoolSlots,
+            'slots_expected' => $effectivePoolSlots === null
+               ? null
+               : $workers * $effectivePoolSlots,
+            'slots_covered' => 0,
+            'worker_slots' => [],
+            'complete' => false,
+         ];
+
+         throw new WorkerWarmupFailure(
+            'Worker warmup cannot attest database pool slots above one.',
+            $coverage,
+         );
+      }
 
       for ($round = 1; $round <= 2; $round++) {
          $elapsed = (\hrtime(true) - $started) / 1_000_000_000;
@@ -220,18 +495,21 @@ final class WorkerWarmup
             budget: $remaining,
             parallel: $parallel,
             index: $round,
+            matrix: true,
          );
          $coverage['rounds'][] = $proof;
          $this->merge($coverage, $proof);
 
-         if (($proof['complete'] ?? false) !== true) {
+         if ($proof['complete'] !== true) {
             $coverage['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
 
-            throw new WorkerWarmupFailure('Worker warmup could not prove complete worker and path coverage.', $coverage);
+            throw new WorkerWarmupFailure('Worker warmup could not prove the complete worker/path matrix.', $coverage);
          }
       }
 
+      /** @var list<string> $first */
       $first = $coverage['rounds'][0]['workers'];
+      /** @var list<string> $second */
       $second = $coverage['rounds'][1]['workers'];
       $coverage['stable'] = $first === $second;
       if (!$coverage['stable']) {
@@ -239,6 +517,30 @@ final class WorkerWarmup
          $coverage['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
 
          throw new WorkerWarmupFailure('Worker identity set changed between warmup rounds.', $coverage);
+      }
+
+      $workerPaths = [];
+      foreach ($first as $fingerprint) {
+         foreach ($paths as $path) {
+            $workerPaths[$fingerprint][$path] =
+               ($coverage['rounds'][0]['worker_paths'][$fingerprint][$path] ?? 0)
+               + ($coverage['rounds'][1]['worker_paths'][$fingerprint][$path] ?? 0);
+         }
+      }
+      $coverage['worker_paths'] = $workerPaths;
+      $coverage['cells_covered'] = $minimum;
+
+      if ($resources !== []) {
+         $workerSlots = \array_fill_keys($first, 1);
+         $coverage['resources']['database'] = [
+            'scope' => 'worker',
+            'proof' => 'selected-path',
+            'slots_expected_per_worker' => 1,
+            'slots_expected' => $workers,
+            'slots_covered' => \count($workerSlots),
+            'worker_slots' => $workerSlots,
+            'complete' => \count($workerSlots) === $workers,
+         ];
       }
 
       $elapsed = (\hrtime(true) - $started) / 1_000_000_000;
@@ -262,21 +564,22 @@ final class WorkerWarmup
          strict: $strict,
          token: $token,
          workers: $workers,
-         attempts: $attempts,
+         attempts: $sealAttempts,
          budget: $remaining,
          parallel: $parallel,
          index: 3,
          seal: true,
+         expected: $first,
       );
       $coverage['seal'] = $seal;
       $this->merge($coverage, $seal);
 
-      if (($seal['complete'] ?? false) !== true) {
+      if ($seal['complete'] !== true) {
          $coverage['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
 
          throw new WorkerWarmupFailure('Worker warmup could not seal every proved worker.', $coverage);
       }
-      if (($seal['workers'] ?? []) !== $first) {
+      if ($seal['workers'] !== $first) {
          $coverage['failures']['seal_worker_set_changed'] = 1;
          $coverage['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
 
@@ -285,7 +588,13 @@ final class WorkerWarmup
 
       $coverage['workers'] = $first;
       $coverage['sealed'] = true;
+      $resourcesComplete = true;
+      foreach ($coverage['resources'] as $resource) {
+         $resourcesComplete = $resourcesComplete && $resource['complete'] === true;
+      }
       $coverage['complete'] = \count($first) === $workers
+         && $coverage['cells_covered'] === $coverage['cells_expected']
+         && $resourcesComplete
          && $coverage['failures'] === [];
       $coverage['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
 
@@ -309,16 +618,40 @@ final class WorkerWarmup
     */
    public function validate (string $JSON, array $coverage, int $duration): array
    {
+      $plan = $coverage['plan'] ?? null;
       if (
          ($coverage['schema'] ?? null) !== 'bootgly.worker-coverage'
-         || ($coverage['version'] ?? null) !== 1
+         || ($coverage['version'] ?? null) !== 2
+         || !\is_array($plan)
+         || ($plan['schema'] ?? null) !== 'bootgly.worker-proof-plan'
+         || ($plan['version'] ?? null) !== 1
+         || ($plan['scheduler'] ?? null) !== self::SCHEDULER
+         || !\is_array($coverage['paths'] ?? null)
+         || !\is_int($plan['workers'] ?? null)
+         || $plan['workers'] !== ($coverage['workers_expected'] ?? null)
+         || !\is_int($plan['unique_paths'] ?? null)
+         || $plan['unique_paths'] !== \count($coverage['paths'])
+         || !\is_int($plan['cells'] ?? null)
+         || $plan['cells'] !== ($coverage['cells_expected'] ?? null)
+         || !\is_int($plan['matrix_attempts'] ?? null)
+         || $plan['matrix_attempts'] < $plan['cells']
+         || !\is_int($plan['seal_attempts'] ?? null)
+         || $plan['seal_attempts'] < $plan['workers']
+         || !\is_float($plan['budget_seconds'] ?? null)
+         || !\is_finite($plan['budget_seconds'])
+         || $plan['budget_seconds'] <= 0
+         || !\in_array($plan['budget_source'] ?? null, ['auto', 'explicit'], true)
+         || ($plan['auto_limit_cells'] ?? null) !== self::AUTO_MATRIX_CELLS
          || ($coverage['complete'] ?? false) !== true
          || ($coverage['stable'] ?? false) !== true
          || ($coverage['sealed'] ?? false) !== true
-         || \count($coverage['rounds'] ?? []) !== 2
+         || !\is_array($coverage['rounds'] ?? null)
+         || \count($coverage['rounds']) !== 2
+         || ($coverage['cells_covered'] ?? -1) !== $coverage['cells_expected']
       ) {
          throw new WorkerWarmupFailure('Sustained warmup lacks complete worker-coverage evidence.', $coverage);
       }
+      /** @var Coverage $coverage */
 
       try {
          $data = \json_decode($JSON, true, flags: \JSON_THROW_ON_ERROR);
@@ -365,7 +698,7 @@ final class WorkerWarmup
             $coverage,
          );
       }
-      if (!\is_string($data['transfer'] ?? null) || ($data['transfer'] ?? '') === '') {
+      if (!\is_string($data['transfer'] ?? null) || $data['transfer'] === '') {
          throw new WorkerWarmupFailure('Sustained warmup transfer evidence is invalid.', $coverage);
       }
       if (
@@ -384,7 +717,10 @@ final class WorkerWarmup
       if (\is_int($declared)) {
          $allowed[$declared] = true;
       }
-      foreach (($coverage['statuses'] ?? []) as $status => $count) {
+      /** @var array<int,int> $coverageStatuses */
+      $coverageStatuses = $coverage['statuses'];
+      foreach ($coverageStatuses as $status => $count) {
+         // @phpstan-ignore-next-line -- retain runtime validation for public input
          if (\is_int($status) && \is_int($count) && $count > 0) {
             $allowed[$status] = true;
          }
@@ -409,6 +745,7 @@ final class WorkerWarmup
          && $data['scheduled'] === $data['sent'] + $data['write_failed']
          && $data['sent'] === $data['responses'] + $data['failed']
          && $data['failed'] === \array_sum($failures)
+         // @phpstan-ignore identical.alwaysTrue
          && $data['write_failed'] === \array_sum($writeFailures)
          && $data['responses'] === \array_sum($statuses);
 
@@ -438,7 +775,7 @@ final class WorkerWarmup
    }
 
    /**
-    * Compose the persistable v1 evidence document from validated inputs.
+    * Compose the persistable v2 evidence document from validated inputs.
     *
     * @param array<string,mixed> $coverage Successful output from probe().
     * @param array<string,mixed> $traffic Successful output from validate().
@@ -451,13 +788,20 @@ final class WorkerWarmup
          ($coverage['complete'] ?? false) !== true
          || ($coverage['stable'] ?? false) !== true
          || ($coverage['sealed'] ?? false) !== true
+         || !\is_array($coverage['plan'] ?? null)
+         || ($coverage['plan']['schema'] ?? null) !== 'bootgly.worker-proof-plan'
+         || ($coverage['plan']['scheduler'] ?? null) !== self::SCHEDULER
          || ($traffic['accounting'] ?? false) !== true
       ) {
          throw new WorkerWarmupFailure('Cannot compose unvalidated worker-warmup evidence.', $coverage);
       }
+      /** @var Coverage $coverage */
+      /** @var Traffic $traffic */
 
       $rounds = [];
-      foreach ($coverage['rounds'] as $round) {
+      /** @var list<Proof> $coverageRounds */
+      $coverageRounds = $coverage['rounds'];
+      foreach ($coverageRounds as $round) {
          $rounds[] = [
             'index' => $round['index'],
             'requests' => $round['requests'],
@@ -467,16 +811,27 @@ final class WorkerWarmup
             'path_requests' => $round['path_requests'],
             'path_responses' => $round['path_responses'],
             'workers' => $round['workers'],
+            'worker_paths' => $round['worker_paths'],
+            'cells_expected' => $round['cells_expected'],
+            'cells_covered' => $round['cells_covered'],
+            'nonce' => [
+               'algorithm' => $round['nonce']['algorithm'],
+               'issued' => $round['nonce']['issued'],
+               'bound' => $round['nonce']['bound'],
+               'replayed' => $round['nonce']['replayed'],
+            ],
             'elapsed' => $round['elapsed'],
             'complete' => $round['complete'],
          ];
       }
+      /** @var Proof $seal */
       $seal = $coverage['seal'];
 
       return [
          'schema' => 'bootgly.worker-aware-warmup',
-         'version' => 1,
+         'version' => 2,
          'validated' => true,
+         'plan' => $coverage['plan'],
          'load' => [
             'method' => $coverage['method'],
             'paths' => $coverage['paths'],
@@ -496,6 +851,16 @@ final class WorkerWarmup
             'statuses' => $coverage['statuses'],
             'path_requests' => $coverage['path_requests'],
             'path_responses' => $coverage['path_responses'],
+            'worker_paths' => $coverage['worker_paths'],
+            'cells_expected' => $coverage['cells_expected'],
+            'cells_covered' => $coverage['cells_covered'],
+            'nonce' => [
+               'algorithm' => $coverage['nonce']['algorithm'],
+               'issued' => $coverage['nonce']['issued'],
+               'bound' => $coverage['nonce']['bound'],
+               'replayed' => $coverage['nonce']['replayed'],
+            ],
+            'resources' => $coverage['resources'],
             'elapsed' => $coverage['elapsed'],
             'rounds' => $rounds,
             'seal' => [
@@ -507,6 +872,12 @@ final class WorkerWarmup
                'path_requests' => $seal['path_requests'],
                'path_responses' => $seal['path_responses'],
                'workers' => $seal['workers'],
+               'nonce' => [
+                  'algorithm' => $seal['nonce']['algorithm'],
+                  'issued' => $seal['nonce']['issued'],
+                  'bound' => $seal['nonce']['bound'],
+                  'replayed' => $seal['nonce']['replayed'],
+               ],
                'elapsed' => $seal['elapsed'],
                'complete' => $seal['complete'],
             ],
@@ -538,8 +909,9 @@ final class WorkerWarmup
     *
     * @param array<int,string> $paths
     * @param array<int,string> $contains
+    * @param array<int,string> $expected
     *
-    * @return array<string,mixed>
+    * @return Proof
     */
    private function survey (
       string $method,
@@ -554,6 +926,8 @@ final class WorkerWarmup
       int $parallel,
       int $index,
       bool $seal = false,
+      bool $matrix = false,
+      array $expected = [],
    ): array
    {
       $started = \hrtime(true);
@@ -568,12 +942,30 @@ final class WorkerWarmup
          'path_requests' => \array_fill_keys($paths, 0),
          'path_responses' => \array_fill_keys($paths, 0),
          'workers' => [],
+         'worker_paths' => [],
+         'cells_expected' => $matrix ? $workers * \count($paths) : $workers,
+         'cells_covered' => 0,
+         'nonce' => [
+            'algorithm' => 'random-256',
+            'issued' => 0,
+            'bound' => 0,
+            'replayed' => 0,
+         ],
          'elapsed' => 0.0,
          'sealed' => $seal,
          'complete' => false,
       ];
       $identities = [];
+      $workerPaths = [];
+      $pathWorkers = \array_fill_keys($paths, 0);
+      $activePaths = $paths;
+      $activePositions = [];
+      foreach ($activePaths as $position => $path) {
+         $activePositions[$path] = $position;
+      }
+      $targets = \array_fill_keys($expected, true);
       $cursor = 0;
+      $cellsCovered = 0;
 
       while ($proof['requests'] < $attempts) {
          if (\hrtime(true) >= $deadline) {
@@ -586,14 +978,22 @@ final class WorkerWarmup
          $pending = [];
 
          for ($slot = 0; $slot < $batch; $slot++) {
-            $path = $paths[$cursor % \count($paths)];
+            $candidateCount = $matrix ? \count($activePaths) : \count($paths);
+            if ($candidateCount === 0) {
+               break;
+            }
+
+            $path = $matrix
+               ? $activePaths[$cursor % $candidateCount]
+               : $paths[$cursor % $candidateCount];
             $cursor++;
             $proof['requests']++;
             $proof['path_requests'][$path]++;
 
             $request = $this->dispatch($method, $path, $token, $deadline, $seal);
-            if (($request['error'] ?? '') !== '') {
-               $reason = (string) $request['error'];
+            $proof['nonce']['issued']++;
+            if ($request['error'] !== '') {
+               $reason = $request['error'];
                $proof['failures'][$reason] = ($proof['failures'][$reason] ?? 0) + 1;
                continue;
             }
@@ -601,14 +1001,16 @@ final class WorkerWarmup
             $pending[] = [
                'socket' => $request['socket'],
                'path' => $path,
+               'nonce' => $request['nonce'],
             ];
          }
 
          foreach ($pending as $request) {
             $response = $this->receive($request['socket'], $deadline, $method);
             $path = $request['path'];
-            if (($response['error'] ?? '') !== '') {
-               $reason = (string) $response['error'];
+            $nonce = $request['nonce'];
+            if ($response['error'] !== '') {
+               $reason = $response['error'];
                $proof['failures'][$reason] = ($proof['failures'][$reason] ?? 0) + 1;
                continue;
             }
@@ -639,24 +1041,31 @@ final class WorkerWarmup
             }
 
             $values = $response['headers'][\strtolower(self::RESPONSE_HEADER)] ?? [];
-            if (\count($values) !== 1 || !\is_string($values[0])) {
-               if ($seal) {
-                  $proof['unmarked']++;
-                  continue;
-               }
+            if ($values === [] && $seal) {
+               $proof['unmarked']++;
+               continue;
+            }
+            if (\count($values) !== 1) {
                $proof['failures']['worker_header'] = ($proof['failures']['worker_header'] ?? 0) + 1;
                continue;
             }
 
-            $prefix = $token . ':';
+            $prefix = $token . ':' . $nonce . ':';
             $value = $values[0];
             if (
                \strlen($value) <= \strlen($prefix)
                || !\hash_equals($prefix, \substr($value, 0, \strlen($prefix)))
             ) {
-               $proof['failures']['worker_header'] = ($proof['failures']['worker_header'] ?? 0) + 1;
+               if (\str_starts_with($value, $token . ':')) {
+                  $proof['nonce']['replayed']++;
+                  $proof['failures']['worker_nonce'] = ($proof['failures']['worker_nonce'] ?? 0) + 1;
+               }
+               else {
+                  $proof['failures']['worker_header'] = ($proof['failures']['worker_header'] ?? 0) + 1;
+               }
                continue;
             }
+            $proof['nonce']['bound']++;
 
             $identity = \substr($value, \strlen($prefix));
             if (
@@ -668,34 +1077,68 @@ final class WorkerWarmup
             }
 
             $fingerprint = 'sha256:' . \hash('sha256', "worker\0{$identity}");
+            if ($seal && !isset($targets[$fingerprint])) {
+               $proof['failures']['unexpected_worker'] = ($proof['failures']['unexpected_worker'] ?? 0) + 1;
+               continue;
+            }
             $identities[$fingerprint] = true;
             $proof['path_responses'][$path]++;
+            $firstCell = !isset($workerPaths[$fingerprint][$path]);
+            $workerPaths[$fingerprint][$path] = ($workerPaths[$fingerprint][$path] ?? 0) + 1;
+
+            if ($matrix && $firstCell) {
+               $cellsCovered++;
+               $pathWorkers[$path]++;
+
+               if ($pathWorkers[$path] === $workers) {
+                  $position = $activePositions[$path];
+                  $lastPosition = \count($activePaths) - 1;
+                  $lastPath = $activePaths[$lastPosition];
+                  if ($position !== $lastPosition) {
+                     $activePaths[$position] = $lastPath;
+                     $activePositions[$lastPath] = $position;
+                  }
+                  \array_pop($activePaths);
+                  unset($activePositions[$path]);
+               }
+            }
 
             if (\count($identities) > $workers) {
                $proof['failures']['worker_overflow'] = 1;
             }
          }
 
-         $pathsCovered = !\in_array(0, $proof['path_responses'], true);
          if (
             $proof['failures'] !== []
             || \count($identities) > $workers
          ) {
             break;
          }
-         if (\count($identities) === $workers && $pathsCovered) {
+         if (
+            ($matrix && $cellsCovered === $workers * \count($paths))
+            || (!$matrix && \count($identities) === $workers)
+         ) {
             break;
          }
       }
 
       $proof['workers'] = \array_keys($identities);
       \sort($proof['workers'], \SORT_STRING);
+      \ksort($workerPaths, \SORT_STRING);
+      foreach ($workerPaths as &$pathCoverage) {
+         \ksort($pathCoverage, \SORT_STRING);
+      }
+      unset($pathCoverage);
+      $proof['worker_paths'] = $workerPaths;
+      $proof['cells_covered'] = $matrix ? $cellsCovered : \count($identities);
       \ksort($proof['statuses'], \SORT_NUMERIC);
       \ksort($proof['failures'], \SORT_STRING);
       $proof['elapsed'] = (\hrtime(true) - $started) / 1_000_000_000;
       $proof['complete'] = $proof['failures'] === []
          && \count($proof['workers']) === $workers
-         && !\in_array(0, $proof['path_responses'], true);
+         && ($matrix
+            ? $proof['cells_covered'] === $proof['cells_expected']
+            : $proof['workers'] === $expected);
 
       if (!$proof['complete'] && $proof['failures'] === []) {
          $proof['failures']['coverage_incomplete'] = 1;
@@ -704,7 +1147,11 @@ final class WorkerWarmup
       return $proof;
    }
 
-   /** Open and write one marked HTTP connection-close probe. */
+   /**
+    * Open and write one marked HTTP connection-close probe.
+    *
+    * @return array{error:non-empty-string}|array{socket:resource,nonce:string,error:''}
+    */
    private function dispatch (
       string $method,
       string $path,
@@ -713,6 +1160,7 @@ final class WorkerWarmup
       bool $seal = false,
    ): array
    {
+      $nonce = \bin2hex(\random_bytes(32));
       $remaining = ($deadline - \hrtime(true)) / 1_000_000_000;
       if ($remaining <= 0) {
          return ['error' => 'budget_exhausted'];
@@ -751,6 +1199,7 @@ final class WorkerWarmup
       $HTTP = "{$method} {$path} HTTP/1.1\r\n"
          . "Host: {$this->host}:{$this->port}\r\n"
          . self::REQUEST_HEADER . ": {$token}\r\n"
+         . self::NONCE_HEADER . ": {$nonce}\r\n"
          . ($seal ? self::SEAL_HEADER . ": {$token}\r\n" : '')
          . "Authorization: Bootgly-Warmup {$token}\r\n"
          . "Connection: close\r\n\r\n";
@@ -787,11 +1236,22 @@ final class WorkerWarmup
 
       return [
          'socket' => $socket,
+         'nonce' => $nonce,
          'error' => '',
       ];
    }
 
-   /** Read and decode one HTTP/1-framed marked response. */
+   /**
+    * Read and decode one HTTP/1-framed marked response.
+    *
+    * @param resource $socket
+    * @return array{error:non-empty-string}|array{
+    *    error:'',
+    *    status:int,
+    *    headers:array<string,list<string>>,
+    *    body:string
+    * }
+    */
    private function receive ($socket, int $deadline, string $method): array
    {
       $raw = '';
@@ -817,7 +1277,7 @@ final class WorkerWarmup
             \fclose($socket);
 
             return [
-               'error' => ($meta['timed_out'] ?? false) === true
+               'error' => $meta['timed_out'] === true
                   && ($bounded || \hrtime(true) >= $deadline)
                      ? 'budget_exhausted'
                      : 'read_failed',
@@ -825,7 +1285,7 @@ final class WorkerWarmup
          }
          if ($chunk === '') {
             $meta = \stream_get_meta_data($socket);
-            if (($meta['timed_out'] ?? false) === true) {
+            if ($meta['timed_out'] === true) {
                \fclose($socket);
 
                return [
@@ -845,12 +1305,12 @@ final class WorkerWarmup
          }
 
          $frame = $this->frame($raw, $method);
-         if (($frame['error'] ?? '') !== '') {
+         if ($frame['error'] !== '') {
             \fclose($socket);
 
             return ['error' => $frame['error']];
          }
-         if (($frame['ready'] ?? false) === true) {
+         if ($frame['ready'] === true) {
             \fclose($socket);
 
             return $this->decode(
@@ -866,7 +1326,11 @@ final class WorkerWarmup
       return $this->decode($raw, $method);
    }
 
-   /** Locate one complete HTTP/1 response without waiting for socket EOF. */
+   /**
+    * Locate one complete HTTP/1 response without waiting for socket EOF.
+    *
+    * @return array{ready:bool,length:int,error:string}
+    */
    private function frame (string $raw, string $method): array
    {
       $offset = 0;
@@ -980,7 +1444,16 @@ final class WorkerWarmup
       return ['ready' => false, 'length' => 0, 'error' => ''];
    }
 
-   /** Decode the final HTTP/1 response and its transfer framing. */
+   /**
+    * Decode the final HTTP/1 response and its transfer framing.
+    *
+    * @return array{error:non-empty-string}|array{
+    *    error:'',
+    *    status:int,
+    *    headers:array<string,list<string>>,
+    *    body:string
+    * }
+    */
    private function decode (string $raw, string $method): array
    {
       $offset = 0;
@@ -1069,6 +1542,37 @@ final class WorkerWarmup
       ];
    }
 
+   /**
+    * Validate and deduplicate the selected load paths without changing order.
+    *
+    * @param array<string,mixed> $load
+    * @return list<string>
+    */
+   private static function select (array $load, ?string $token = null): array
+   {
+      $paths = $load['paths'] ?? null;
+      if (!\is_array($paths) || $paths === []) {
+         throw new \InvalidArgumentException('Warmup load paths must be a non-empty array.');
+      }
+
+      $selected = [];
+      foreach ($paths as $path) {
+         if (
+            !\is_string($path)
+            || $path === ''
+            || $path[0] !== '/'
+            || \str_contains($path, "\r")
+            || \str_contains($path, "\n")
+            || ($token !== null && \str_contains($path, $token))
+         ) {
+            throw new \InvalidArgumentException('Warmup load contains an unsafe path.');
+         }
+         $selected[$path] = true;
+      }
+
+      return \array_keys($selected);
+   }
+
    /** Decode one complete HTTP chunked body. */
    private function unchunk (string $body): ?string
    {
@@ -1114,7 +1618,13 @@ final class WorkerWarmup
       return null;
    }
 
-   /** Normalize one positive-count ledger map. */
+   /**
+    * Normalize one positive-count ledger map.
+    *
+    * @param array<string,mixed> $data
+    * @param array<string,mixed> $coverage
+    * @return array<int|string,int>
+    */
    private function normalize (
       array $data,
       string $field,
@@ -1151,15 +1661,32 @@ final class WorkerWarmup
       return $normalized;
    }
 
-   /** Merge one round's scalar ledgers into aggregate coverage evidence. */
+   /**
+    * Merge one round's scalar ledgers into aggregate coverage evidence.
+    *
+    * @param Coverage $coverage
+    * @param-out Coverage $coverage
+    * @param Proof $proof
+    */
    private function merge (array &$coverage, array $proof): void
    {
+      /** @var Coverage $coverage */
       $coverage['requests'] += $proof['requests'];
       $coverage['responses'] += $proof['responses'];
-      foreach (['failures', 'statuses', 'path_requests', 'path_responses'] as $ledger) {
-         foreach ($proof[$ledger] as $key => $count) {
-            $coverage[$ledger][$key] = ($coverage[$ledger][$key] ?? 0) + $count;
-         }
+      foreach (['issued', 'bound', 'replayed'] as $counter) {
+         $coverage['nonce'][$counter] += $proof['nonce'][$counter];
+      }
+      foreach ($proof['failures'] as $reason => $count) {
+         $coverage['failures'][$reason] = ($coverage['failures'][$reason] ?? 0) + $count;
+      }
+      foreach ($proof['statuses'] as $status => $count) {
+         $coverage['statuses'][$status] = ($coverage['statuses'][$status] ?? 0) + $count;
+      }
+      foreach ($proof['path_requests'] as $path => $count) {
+         $coverage['path_requests'][$path] = ($coverage['path_requests'][$path] ?? 0) + $count;
+      }
+      foreach ($proof['path_responses'] as $path => $count) {
+         $coverage['path_responses'][$path] = ($coverage['path_responses'][$path] ?? 0) + $count;
       }
       \ksort($coverage['failures'], \SORT_STRING);
       \ksort($coverage['statuses'], \SORT_NUMERIC);

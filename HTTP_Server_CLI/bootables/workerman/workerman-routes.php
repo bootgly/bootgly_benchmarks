@@ -1,7 +1,9 @@
 <?php
 require_once 'vendor/autoload.php';
 require_once __DIR__ . '/../../../runners/Profiles.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Workerman\Worker;
 use Workerman\Timer;
 use Workerman\Protocols\Http\Response;
@@ -60,6 +62,15 @@ $http_worker->onMessage = function ($connection, Request $request) use ($static)
         'Content-Type' => 'text/plain',
         'Date'         => Header::$date
     ];
+    if (WorkerEvidence::$enabled) {
+        $identity = WorkerEvidence::identify(
+            $request->header('x-bootgly-benchmark-warmup'),
+            $request->header('x-bootgly-benchmark-seal'),
+        );
+        if ($identity !== null) {
+            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+        }
+    }
 
     if (isset($static[$path])) {
         $connection->send(new Response(200, $headers, $static[$path]));

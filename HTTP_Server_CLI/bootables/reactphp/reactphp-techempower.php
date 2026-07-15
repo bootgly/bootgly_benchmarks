@@ -12,7 +12,7 @@
  * ->toArray()->toPromise() and combine the N queries of /query, /updates and
  * /cached-queries with React\Promise\all() before resolving the HTTP response.
  *
- * Worker model (fair, mirrors the swoole-coroutine bootable): the process
+ * Worker model: the process
  * forks BOOTGLY_WORKERS children; EACH child runs its OWN React event loop and
  * binds 0.0.0.0:8082 with SO_REUSEPORT, so the kernel load-balances accepts
  * across the workers. The parent only reaps. ONE PgAsync\Client per worker is
@@ -31,7 +31,9 @@
  */
 
 require_once 'vendor/autoload.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
 use React\Http\Message\Response;
@@ -121,21 +123,32 @@ function serve (string $host, int $port): void
 
    // @ Async request handler — returns a Response or a Promise<Response>.
    $Server = new HttpServer(static function (ServerRequestInterface $Request) use ($Client, &$CachedWorlds): mixed {
+      $headers = [];
+      if (WorkerEvidence::$enabled) {
+         $identity = WorkerEvidence::identify(
+            $Request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $Request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
+         );
+         if ($identity !== null) {
+            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+         }
+      }
+
       $path = $Request->getUri()->getPath();
 
       // ? TechEmpower /plaintext + /json: static, no DB. Handle early.
       if ($path === '/plaintext') {
-         return new Response(200, ['Content-Type' => 'text/plain'], 'Hello, World!');
+         return new Response(200, $headers + ['Content-Type' => 'text/plain'], 'Hello, World!');
       }
       if ($path === '/json') {
-         return new Response(200, ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}');
+         return new Response(200, $headers + ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}');
       }
 
       try {
          switch ($path) {
             case '/db':
                return fetchWorld($Client, mt_rand(1, 10000))->then(
-                  static fn (array $World): Response => json(json_encode($World, JSON_NUMERIC_CHECK) ?: '{}')
+                  static fn (array $World): Response => json(json_encode($World, JSON_NUMERIC_CHECK) ?: '{}', $headers)
                );
 
             case '/query':
@@ -146,7 +159,7 @@ function serve (string $host, int $port): void
                }
 
                return all($Promises)->then(
-                  static fn (array $Worlds): Response => json(json_encode(array_values($Worlds), JSON_NUMERIC_CHECK) ?: '[]')
+                  static fn (array $Worlds): Response => json(json_encode(array_values($Worlds), JSON_NUMERIC_CHECK) ?: '[]', $headers)
                );
 
             case '/fortunes':
@@ -154,7 +167,7 @@ function serve (string $host, int $port): void
                   ->query('SELECT id, message FROM Fortune')
                   ->toArray()
                   ->toPromise()
-                  ->then(static function (array $rows): Response {
+                  ->then(static function (array $rows) use ($headers): Response {
                      $Fortunes = [0 => 'Additional fortune added at request time.'];
                      foreach ($rows as $row) {
                         $Fortunes[(int) $row['id']] = (string) $row['message'];
@@ -169,7 +182,7 @@ function serve (string $host, int $port): void
 
                      $body = "<!DOCTYPE html><html><head><title>Fortunes</title></head><body><table><tr><th>id</th><th>message</th></tr>{$html}</table></body></html>";
 
-                     return new Response(200, ['Content-Type' => 'text/html; charset=utf-8'], $body);
+                     return new Response(200, $headers + ['Content-Type' => 'text/html; charset=utf-8'], $body);
                   });
 
             case '/updates':
@@ -183,14 +196,14 @@ function serve (string $host, int $port): void
                   });
                }
 
-               return all($Promises)->then(static function (array $Worlds) use ($Client): PromiseInterface {
+               return all($Promises)->then(static function (array $Worlds) use ($Client, $headers): PromiseInterface {
                   $Worlds = array_values($Worlds);
 
                   // @ ONE batched write: UPDATE World SET randomNumber =
                   //   CASE id WHEN $n::integer THEN $n::integer ... END
                   //   WHERE id IN ($n::integer, ...).
                   if ($Worlds === []) {
-                     return resolve(json('[]'));
+                     return resolve(json('[]', $headers));
                   }
 
                   $cases = [];
@@ -213,32 +226,32 @@ function serve (string $host, int $port): void
                      ->executeStatement($sql, $parameters)
                      ->toArray()
                      ->toPromise()
-                     ->then(static fn (): Response => json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]'));
+                     ->then(static fn (): Response => json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]', $headers));
                });
 
             case '/cached-queries':
                $count = clamp(query_param($Request, 'count'));
                $max = count($CachedWorlds);
                if ($max === 0) {
-                  return json('[]');
+                  return json('[]', $headers);
                }
                $Worlds = [];
                while ($count-- > 0) {
                   $Worlds[] = $CachedWorlds[mt_rand(1, $max)] ?? null;
                }
 
-               return json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]');
+               return json(json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]', $headers);
 
             case '/':
                // Warmup/probe — the runner warms up with GET /.
-               return new Response(200, ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark');
+               return new Response(200, $headers + ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark');
 
             default:
-               return new Response(404, ['Content-Type' => 'text/plain'], 'Not Found');
+               return new Response(404, $headers + ['Content-Type' => 'text/plain'], 'Not Found');
          }
       }
       catch (Throwable $Throwable) {
-         return new Response(500, ['Content-Type' => 'text/plain'], $Throwable->getMessage());
+         return new Response(500, $headers + ['Content-Type' => 'text/plain'], $Throwable->getMessage());
       }
    });
 
@@ -299,7 +312,7 @@ function query_param (ServerRequestInterface $Request, string $name): mixed
 /**
  * application/json response shortcut.
  */
-function json (string $body): Response
+function json (string $body, array $headers): Response
 {
-   return new Response(200, ['Content-Type' => 'application/json'], $body);
+   return new Response(200, $headers + ['Content-Type' => 'application/json'], $body);
 }

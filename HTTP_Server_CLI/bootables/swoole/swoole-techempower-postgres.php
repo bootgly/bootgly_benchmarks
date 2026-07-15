@@ -1,5 +1,8 @@
 <?php
 
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
+
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Swoole\Database\PDOConfig;
 use Swoole\Database\PDOPool;
 use Swoole\Coroutine\WaitGroup;
@@ -301,12 +304,9 @@ $PIDFile = is_string($PIDFile) && $PIDFile !== ''
       ? rtrim($serverDirectory, DIRECTORY_SEPARATOR) . '/swoole.pid'
       : null);
 
-// @ Reactor mode: SWOOLE_PROCESS by default (master + per-worker PDO pool). The
-//   Swoole opponent runs this TechEmpower route set in SWOOLE_BASE via
-//   SWOOLE_SERVER_MODE=base — every worker accepts its own connections.
-$mode = getenv('SWOOLE_SERVER_MODE') === 'base' ? SWOOLE_BASE : SWOOLE_PROCESS;
-
-$Server = new Server('0.0.0.0', is_numeric($port) ? (int) $port : 8082, $mode);
+// @ The supported Swoole benchmark topology is SWOOLE_BASE: every worker
+//   accepts its own connections via SO_REUSEPORT.
+$Server = new Server('0.0.0.0', is_numeric($port) ? (int) $port : 8082, SWOOLE_BASE);
 $settings = [
    'worker_num' => is_numeric($workers) ? max(1, (int) $workers) : 1,
    'daemonize' => false,
@@ -330,6 +330,16 @@ $Server->on('workerStart', static function (): void {
 });
 
 $Server->on('request', static function (Request $Request, Response $Response): void {
+   if (WorkerEvidence::$enabled) {
+      $identity = WorkerEvidence::identify(
+         $Request->header['x-bootgly-benchmark-warmup'] ?? null,
+         $Request->header['x-bootgly-benchmark-seal'] ?? null,
+      );
+      if ($identity !== null) {
+         $Response->header('X-Bootgly-Benchmark-Worker', $identity);
+      }
+   }
+
    $path = $Request->server['request_uri'] ?? '/';
 
    // @ TechEmpower /plaintext + /json: static, no DB. Handle early.

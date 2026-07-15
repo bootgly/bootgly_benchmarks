@@ -17,9 +17,12 @@ use Bootgly\ACI\Tests\Benchmark\Configs\Loads;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\Benchmarks\Runners\RunProcess;
 use Bootgly\Benchmarks\Runners\ServerReadiness;
+use Bootgly\Benchmarks\Runners\WorkerWarmup;
+use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 
 require_once __DIR__ . '/RunArtifacts.php';
 require_once __DIR__ . '/ServerReadiness.php';
+require_once __DIR__ . '/WorkerWarmup.php';
 
 
 return new class (
@@ -48,8 +51,7 @@ return new class (
    public int $preflightRetries = 5;
    public int $preflightRecovery = 2;
    // # warmup
-   public int $warmupDuration = 2;
-   public int $warmupConnections = 64;
+   public int $warmupDuration = 5;
    // # server readiness
    public int $readyTimeout = 10;
 
@@ -87,6 +89,12 @@ return new class (
       if (isset($options['pipeline'])) {
          $this->pipeline = (int) $options['pipeline'];
       }
+      if (isset($options['warmup'])) {
+         $this->warmupDuration = (int) $options['warmup'];
+      }
+      if ($this->warmupDuration < 1) {
+         throw new InvalidArgumentException('--warmup must be a positive number of seconds.');
+      }
 
       // ! Materialise the auto client-worker count so $this->meta captures the
       //   resolved value (nproc / 2) instead of the `0` auto sentinel.
@@ -98,6 +106,7 @@ return new class (
       $this->meta['duration']       = $this->duration;
       $this->meta['client-workers'] = $this->workers;
       $this->meta['pipeline']       = $this->pipeline;
+      $this->meta['warmup']         = $this->warmupDuration;
 
    }
    public function options (): array
@@ -107,6 +116,7 @@ return new class (
          '--connections=N'    => 'Number of TCP connections (default: 514)',
          '--duration=N'       => 'Benchmark duration in seconds (default: 10)',
          '--pipeline=N'       => 'HTTP pipelining factor (default: 1)',
+         '--warmup=N'         => 'Selected-load warmup duration in seconds (default: 5)',
       ];
    }
 
@@ -143,7 +153,7 @@ return new class (
             'Connections'    => (string) $this->connections,
             'Duration'       => "{$this->duration} s",
             'Pipeline'       => (string) $this->pipeline,
-            'Warmup'         => "{$this->warmupConnections} connections · {$this->warmupDuration} s",
+            'Warmup'         => "{$this->warmupDuration} s · selected load · worker proof",
          ],
          'Server' => [
             'Port' => (string) $this->port,
@@ -214,60 +224,7 @@ return new class (
          $workers = $Opponent->workers
             ?? max(1, (int) ((int) (exec('nproc 2>/dev/null') ?: 1) / 2));
 
-         // @ Kill port
-         $this->killPort();
-
-         // @ Start server
-         $activeOpponent = $Opponent;
-         $stopping = false;
-
          try {
-         echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
-         $this->startServer($Opponent, $workers);
-
-         // @ Wait for server readiness
-         if ( !$this->waitForServer($Opponent) ) {
-            echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n";
-            // ? Surface the opponent's own start output (e.g. capability guard message).
-            $files = [
-               $this->serverLog,
-               $this->serverError,
-               $this->ServerArtifacts?->resolve('process.capture/stdout.log'),
-               $this->ServerArtifacts?->resolve('process.capture/stderr.log'),
-               $this->ServerArtifacts?->resolve('daemon/stdout.log'),
-               $this->ServerArtifacts?->resolve('daemon/stderr.log'),
-               $this->ServerArtifacts?->resolve('daemon.capture/stdout.log'),
-               $this->ServerArtifacts?->resolve('daemon.capture/stderr.log'),
-            ];
-            $output = '';
-            foreach ($files as $file) {
-               $output .= is_string($file) && is_file($file)
-                  ? (string) file_get_contents($file) . "\n"
-                  : '';
-            }
-            $output = trim($output);
-            foreach ($output === '' ? [] : array_slice(explode("\n", $output), -6) as $line) {
-               echo "    {$DIM}{$line}{$RESET}\n";
-            }
-            echo "\n";
-            $stopping = true;
-            $this->stopServer($Opponent);
-            $activeOpponent = null;
-            $stopping = false;
-            if ($interrupted) {
-               exit(130);
-            }
-            continue;
-         }
-
-         echo "    {$GREEN}{$Opponent->name} ready (port {$this->port}).{$RESET}\n";
-
-         // @ Warmup
-         echo "    {$DIM}Warming up ({$this->warmupDuration}s)...{$RESET}\n";
-         $this->warmup();
-         // @ Let server recover from warmup connection cleanup
-         sleep(2);
-
          // @@ Run loads
          $loadResults = [];
          $loadNum = 0;
@@ -295,7 +252,72 @@ return new class (
 
             $loadNum++;
 
-            $Result = $this->command($Load, $this->connections, $this->workers);
+            // @ Worker evidence is sealed permanently inside each server process.
+            // ! Give every load a fresh server lifecycle so its own selected-load
+            // ! warmup can be proved and then fully removed before measurement.
+            $warmupToken = WorkerWarmup::issue();
+            $this->killPort();
+            $activeOpponent = $Opponent;
+            $stopping = false;
+
+            echo "  {$BOLD}{$BLUE}▸ Starting {$Opponent->name}...{$RESET}\n";
+            $this->boot($Opponent, $workers, $warmupToken);
+
+            // @ Wait for server readiness
+            if ( !$this->waitForServer($Opponent) ) {
+               echo "    {$RED}{$Opponent->name} failed to start!{$RESET}\n";
+               // ? Surface the opponent's own start output (e.g. capability guard message).
+               $files = [
+                  $this->serverLog,
+                  $this->serverError,
+                  $this->ServerArtifacts?->resolve('process.capture/stdout.log'),
+                  $this->ServerArtifacts?->resolve('process.capture/stderr.log'),
+                  $this->ServerArtifacts?->resolve('daemon/stdout.log'),
+                  $this->ServerArtifacts?->resolve('daemon/stderr.log'),
+                  $this->ServerArtifacts?->resolve('daemon.capture/stdout.log'),
+                  $this->ServerArtifacts?->resolve('daemon.capture/stderr.log'),
+               ];
+               $output = '';
+               foreach ($files as $file) {
+                  $output .= is_string($file) && is_file($file)
+                     ? (string) file_get_contents($file) . "\n"
+                     : '';
+               }
+               $output = trim($output);
+               foreach ($output === '' ? [] : array_slice(explode("\n", $output), -6) as $line) {
+                  echo "    {$DIM}{$line}{$RESET}\n";
+               }
+               echo "\n";
+               $stopping = true;
+               $this->stopServer($Opponent);
+               $activeOpponent = null;
+               $stopping = false;
+               if ($interrupted) {
+                  exit(130);
+               }
+               continue 2;
+            }
+
+            echo "    {$GREEN}{$Opponent->name} ready (port {$this->port}).{$RESET}\n";
+
+            $Result = $this->command(
+               $Load,
+               $warmupToken,
+               $workers,
+               $Opponent->name,
+               $this->connections,
+               $this->workers,
+            );
+
+            // @ A sealed server cannot prove another load. Stop it after the
+            // @ measured window; the next load receives a fresh process/token.
+            $stopping = true;
+            $this->stopServer($Opponent);
+            $activeOpponent = null;
+            $stopping = false;
+            if ($interrupted) {
+               exit(130);
+            }
 
             // @ Real-time result
             $rps = $Result->rps !== null
@@ -319,15 +341,6 @@ return new class (
          }
 
          echo "\n";
-
-         // @ Stop server
-         $stopping = true;
-         $this->stopServer($Opponent);
-         $activeOpponent = null;
-         $stopping = false;
-         if ($interrupted) {
-            exit(130);
-         }
 
          $results[$Opponent->name] = $loadResults;
          }
@@ -362,7 +375,7 @@ return new class (
       exec("lsof -ti :{$this->port} 2>/dev/null | xargs kill -9 2>/dev/null");
       usleep(500_000);
    }
-   private function startServer (Opponent $Opponent, int $workers): void
+   private function boot (Opponent $Opponent, int $workers, string $token): void
    {
       $script = $Opponent->script;
       putenv("BOOTGLY_WORKERS={$workers}");
@@ -372,6 +385,7 @@ return new class (
       $this->serverError = $this->ServerArtifacts->resolve('process/stderr.log');
       $environment = [
          'BENCHMARK_SERVER_DIR' => $this->ServerArtifacts->directory,
+         'BENCHMARK_WARMUP_TOKEN' => $token,
          'BOOTGLY_WORKERS' => (string) $workers,
       ];
       if (isset($this->meta['db-pool-max'])) {
@@ -472,34 +486,158 @@ return new class (
     */
 
    // # Benchmark execution
-   private function warmup (): void
+   /**
+    * Run sustained selected-load traffic with the measured shape, then prove
+    * stable worker coverage as the final barrier before measurement.
+    *
+    * @param array<string,mixed> $load
+    */
+   private function warmup (
+      array $load,
+      string $JSON,
+      string $token,
+      int $serverWorkers,
+      int $connections,
+      int $clientWorkers,
+      int $pipeline,
+      string $opponent,
+      string $label,
+   ): bool
    {
-      // @ Run worker.php with reduced load for warmup
       $workerScript = __DIR__ . '/TCP_Client/worker.php';
       $Artifacts = RunArtifacts::create('tcp-client-warmup');
-      $JSON = json_encode([
-         'method' => 'GET',
-         'paths'  => ['/'],
-      ], JSON_THROW_ON_ERROR);
       $input = $Artifacts->write('input.json', $JSON);
+      $Warmup = new WorkerWarmup('127.0.0.1', $this->port, (float) $this->preflightTimeout);
+      $context = [
+         'opponent' => $opponent,
+         'label' => $label,
+         'load_input_sha256' => 'sha256:' . hash('sha256', $JSON),
+         'requested_warmup_duration' => $this->warmupDuration,
+         'server_workers' => $serverWorkers,
+         'client_workers' => $clientWorkers,
+         'connections' => $connections,
+         'pipeline' => $pipeline,
+         'db_pool_max' => isset($this->meta['db-pool-max'])
+            ? (int) $this->meta['db-pool-max']
+            : null,
+      ];
+      $coverage = [];
+      $execution = null;
 
       try {
-         $Artifacts->run([
+         $command = [
             PHP_BINARY,
             $workerScript,
             '--host=127.0.0.1',
             "--port={$this->port}",
-            "--connections={$this->warmupConnections}",
+            "--connections={$connections}",
             "--duration={$this->warmupDuration}",
             "--paths-file={$input}",
-            '--workers=' . $this->resolveClientWorkers(),
-         ], $this->warmupDuration + 30.0, 2.0);
+            "--workers={$clientWorkers}",
+         ];
+         if ($pipeline > 1) {
+            $command[] = "--pipeline={$pipeline}";
+         }
+
+         $execution = $Artifacts->run($command, $this->warmupDuration + 30.0, 2.0);
+         if ($execution['exit'] !== 0) {
+            throw new WorkerWarmupFailure(
+               "Sustained warmup worker exited with status {$execution['exit']}.",
+               $coverage,
+            );
+         }
+
+         $output = @file_get_contents($execution['stdout']);
+         if ($output === false) {
+            throw new WorkerWarmupFailure('Sustained warmup output could not be read.', $coverage);
+         }
+
+         $budget = min(30.0, max(10.0, 5.0 + ($serverWorkers * 0.5)));
+         $coverage = $Warmup->probe(
+            load: $load,
+            token: $token,
+            workers: $serverWorkers,
+            budget: $budget,
+         );
+         $traffic = $Warmup->validate($output, $coverage, $this->warmupDuration);
+         $evidence = $Warmup->compose($coverage, $traffic);
+         $evidence['context'] = $context;
+         $Artifacts->write(
+            'evidence.json',
+            json_encode(
+               $evidence,
+               JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ) . "\n",
+         );
+
+         $covered = count($coverage['workers']);
+         echo "      Warmup {$this->warmupDuration}s: {$covered}/{$serverWorkers} workers"
+            . " · probe={$coverage['responses']}/{$coverage['requests']}"
+            . " · responses={$traffic['responses']}"
+            . " · failed={$traffic['failed']}"
+            . " · write-failed={$traffic['write_failed']}"
+            . " · connection-failed={$traffic['connection_failed']}\n";
+
+         return true;
+      }
+      catch (Throwable $Throwable) {
+         $partial = $Throwable instanceof WorkerWarmupFailure
+            ? $Throwable->evidence
+            : $coverage;
+         $evidence = [
+            'schema' => 'bootgly.worker-aware-warmup',
+            'version' => 1,
+            'validated' => false,
+            'context' => $context,
+            'error' => $Throwable->getMessage(),
+            'coverage' => $partial,
+         ];
+         if (is_array($execution)) {
+            $evidence['traffic_process'] = [
+               'exit' => $execution['exit'],
+               'timed_out' => $execution['timed_out'] ?? false,
+               'state' => $execution['state'] ?? null,
+               'signal' => $execution['signal'] ?? null,
+            ];
+         }
+
+         try {
+            $Artifacts->write(
+               'evidence.json',
+               json_encode(
+                  $evidence,
+                  JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+               ) . "\n",
+            );
+         }
+         catch (Throwable $EvidenceThrowable) {
+            echo "      Warmup evidence could not be persisted: {$EvidenceThrowable->getMessage()}\n";
+         }
+
+         $rounds = is_array($partial['rounds'] ?? null) ? $partial['rounds'] : [];
+         $last = $rounds === [] ? [] : $rounds[array_key_last($rounds)];
+         $covered = count(is_array($last['workers'] ?? null) ? $last['workers'] : []);
+         $responses = is_int($partial['responses'] ?? null) ? $partial['responses'] : 0;
+         $failures = is_array($partial['failures'] ?? null)
+            ? array_sum($partial['failures'])
+            : 0;
+         echo "      Warmup failed: {$Throwable->getMessage()}"
+            . " ({$covered}/{$serverWorkers} workers, responses={$responses}, failures={$failures})\n";
+
+         return false;
       }
       finally {
          $Artifacts->clean();
       }
    }
-   private function command (Load $Load, int $connections = 0, int $clientWorkers = 0): Result
+   private function command (
+      Load $Load,
+      string $token,
+      int $serverWorkers,
+      string $opponent,
+      int $connections = 0,
+      int $clientWorkers = 0,
+   ): Result
    {
       $workerScript = __DIR__ . '/TCP_Client/worker.php';
       $connections = $connections > 0 ? $connections : $this->connections;
@@ -531,8 +669,22 @@ return new class (
          return new Result();
       }
 
-      $Artifacts = RunArtifacts::create('tcp-client-load');
       $JSON = json_encode($loadData, JSON_THROW_ON_ERROR);
+      if (!$this->warmup(
+         $loadData,
+         $JSON,
+         $token,
+         $serverWorkers,
+         $connections,
+         $clientWorkers,
+         $this->pipeline,
+         $opponent,
+         $Load->label,
+      )) {
+         return new Result();
+      }
+
+      $Artifacts = RunArtifacts::create('tcp-client-load');
       $input = $Artifacts->write('input.json', $JSON);
       $command = [
          PHP_BINARY,

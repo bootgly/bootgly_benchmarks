@@ -6,10 +6,10 @@
  *
  * Amp v3 (fibers) async HTTP server serving the 7 TechEmpower (TFB) routes:
  *   /plaintext /json /db /query /fortunes /updates /cached-queries
- * (+ GET / warmup probe, anything else => 404).
+ * (+ a compatibility GET / route; anything else => 404).
  *
  * Worker model (mirrors the manual pcntl_fork + SO_REUSEPORT idiom used by the
- * Swoole coroutine bootable / the ReactPHP opponent — NOT amphp/cluster): the
+ * Swoole and ReactPHP opponents — NOT amphp/cluster): the
  * parent pcntl_fork()s $workers children; EACH child runs its OWN Revolt event
  * loop and binds 0.0.0.0:8082 with SO_REUSEPORT. The parent only reaps.
  *
@@ -26,6 +26,7 @@
  */
 
 require_once 'vendor/autoload.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
 use function Amp\trapSignal;
 use Amp\Http\HttpStatus;
@@ -37,6 +38,7 @@ use Amp\Http\Server\SocketHttpServer;
 use Amp\Postgres\PostgresConfig;
 use Amp\Postgres\PostgresConnectionPool;
 use Amp\Socket\BindContext;
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Psr\Log\NullLogger;
 
 if (extension_loaded('pgsql') === false) {
@@ -51,32 +53,44 @@ $port = 8082;
 $workers = (int) (getenv('BOOTGLY_WORKERS') ?: max(1, (int) ((int) (shell_exec('nproc 2>/dev/null') ?: 1) / 2)));
 $workers = max(1, $workers);
 
-// @ Fork workers (parent + children = $workers total). Children break out to
-//   serve; the parent falls through to reap them.
-$pids = [];
-for ($i = 1; $i < $workers; $i++) {
-    $pid = pcntl_fork();
-    if ($pid === 0) {
-        // Child process — break out and start serving.
+// @ Fork exactly $workers serving children. The parent remains a supervisor
+//   and reaps them; it never consumes one of the configured worker slots.
+$PIDs = [];
+$serving = false;
+for ($i = 0; $i < $workers; $i++) {
+    $PID = pcntl_fork();
+    if ($PID === 0) {
+        $serving = true;
         break;
     }
-    if ($pid > 0) {
-        $pids[] = $pid;
+    if ($PID < 0) {
+        foreach ($PIDs as $ChildPID) {
+            posix_kill($ChildPID, SIGTERM);
+        }
+        fwrite(STDERR, "AMPHP worker fork failed.\n");
+        exit(1);
     }
+
+    $PIDs[] = $PID;
 }
 
-// ? Parent: reap children and exit. Children never reach this (they broke out
-//   of the loop above with $i < $workers still true, so $pids stays the full
-//   list only in the parent).
-if ($pids !== [] && count($pids) === $workers - 1) {
-    foreach ($pids as $childPid) {
-        pcntl_waitpid($childPid, $status);
+if (!$serving) {
+    $exit = 0;
+    foreach ($PIDs as $ChildPID) {
+        $waited = pcntl_waitpid($ChildPID, $status);
+        if (
+            $waited !== $ChildPID
+            || !pcntl_wifexited($status)
+            || pcntl_wexitstatus($status) !== 0
+        ) {
+            $exit = 1;
+        }
     }
-    exit(0);
+    exit($exit);
 }
 
 // ============================================================================
-// Worker (child, or the single process when $workers === 1): own event loop.
+// Worker child: own event loop.
 // ============================================================================
 
 // # ONE persistent async PostgreSQL pool per worker.
@@ -153,14 +167,25 @@ $fetchWorld = static function ($Pool, int $id): array {
 
 $RequestHandler = new ClosureRequestHandler(
     static function (Request $Request) use (&$Pool, &$cachedWorlds, $clamp, $param, $fetchWorld): Response {
+        $headers = [];
+        if (WorkerEvidence::$enabled) {
+            $identity = WorkerEvidence::identify(
+                $Request->getHeader('X-Bootgly-Benchmark-Warmup'),
+                $Request->getHeader('X-Bootgly-Benchmark-Seal'),
+            );
+            if ($identity !== null) {
+                $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+            }
+        }
+
         $path = $Request->getUri()->getPath();
 
         // @ TechEmpower /plaintext + /json: static, no DB. Handle early.
         if ($path === '/plaintext') {
-            return new Response(HttpStatus::OK, ['content-type' => 'text/plain'], 'Hello, World!');
+            return new Response(HttpStatus::OK, $headers + ['content-type' => 'text/plain'], 'Hello, World!');
         }
         if ($path === '/json') {
-            return new Response(HttpStatus::OK, ['content-type' => 'application/json'], '{"message":"Hello, World!"}');
+            return new Response(HttpStatus::OK, $headers + ['content-type' => 'application/json'], '{"message":"Hello, World!"}');
         }
 
         try {
@@ -243,16 +268,16 @@ $RequestHandler = new ClosureRequestHandler(
 
                 case '/':
                     // Warmup/probe — the runner warms up with GET /.
-                    return new Response(HttpStatus::OK, ['content-type' => 'text/plain'], 'TechEmpower Benchmark');
+                    return new Response(HttpStatus::OK, $headers + ['content-type' => 'text/plain'], 'TechEmpower Benchmark');
 
                 default:
-                    return new Response(HttpStatus::NOT_FOUND, ['content-type' => 'text/plain'], 'Not Found');
+                    return new Response(HttpStatus::NOT_FOUND, $headers + ['content-type' => 'text/plain'], 'Not Found');
             }
 
-            return new Response(HttpStatus::OK, ['content-type' => $contentType], $body);
+            return new Response(HttpStatus::OK, $headers + ['content-type' => $contentType], $body);
         }
         catch (Throwable $Throwable) {
-            return new Response(HttpStatus::INTERNAL_SERVER_ERROR, ['content-type' => 'text/plain'], $Throwable->getMessage());
+            return new Response(HttpStatus::INTERNAL_SERVER_ERROR, $headers + ['content-type' => 'text/plain'], $Throwable->getMessage());
         }
     }
 );

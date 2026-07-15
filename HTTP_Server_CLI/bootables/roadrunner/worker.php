@@ -10,7 +10,9 @@
  */
 
 require __DIR__ . '/vendor/autoload.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Nyholm\Psr7\Response;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Spiral\RoadRunner\Worker;
@@ -37,10 +39,19 @@ for ($i = 11; $i <= 100; $i++) {
    $static["/static/{$i}"] = "Static {$i}";
 }
 
-$headers = ['Content-Type' => 'text/plain'];
-
 while ($request = $psr7->waitRequest()) {
    try {
+      $headers = ['Content-Type' => 'text/plain'];
+      if (WorkerEvidence::$enabled) {
+         $identity = WorkerEvidence::identify(
+            $request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
+         );
+         if ($identity !== null) {
+            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+         }
+      }
+
       $path = $request->getUri()->getPath();
 
       // Static routes

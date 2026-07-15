@@ -16,7 +16,9 @@
  */
 
 require __DIR__ . '/vendor/autoload.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Nyholm\Psr7\Response;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Spiral\RoadRunner\Worker;
@@ -90,16 +92,27 @@ $psr7    = new PSR7Worker($worker, $factory, $factory, $factory);
 
 while ($request = $psr7->waitRequest()) {
    try {
+      $headers = [];
+      if (WorkerEvidence::$enabled) {
+         $identity = WorkerEvidence::identify(
+            $request->getHeaderLine('X-Bootgly-Benchmark-Warmup'),
+            $request->getHeaderLine('X-Bootgly-Benchmark-Seal'),
+         );
+         if ($identity !== null) {
+            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+         }
+      }
+
       $path  = $request->getUri()->getPath();
       $query = $request->getQueryParams();
 
       // /plaintext + /json: static, no DB. Handle early.
       if ($path === '/plaintext') {
-         $psr7->respond(new Response(200, ['Content-Type' => 'text/plain'], 'Hello, World!'));
+         $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/plain'], 'Hello, World!'));
          continue;
       }
       if ($path === '/json') {
-         $psr7->respond(new Response(200, ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}'));
+         $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], '{"message":"Hello, World!"}'));
          continue;
       }
 
@@ -107,7 +120,7 @@ while ($request = $psr7->waitRequest()) {
          case '/db':
             $World = $fetchWorld($worldStatement, mt_rand(1, 10000));
             $body = json_encode($World, JSON_NUMERIC_CHECK) ?: '{}';
-            $psr7->respond(new Response(200, ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
             continue 2;
 
          case '/query':
@@ -117,7 +130,7 @@ while ($request = $psr7->waitRequest()) {
                $Worlds[] = $fetchWorld($worldStatement, mt_rand(1, 10000));
             }
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
             continue 2;
 
          case '/fortunes':
@@ -139,7 +152,7 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = "<!DOCTYPE html><html><head><title>Fortunes</title></head><body><table><tr><th>id</th><th>message</th></tr>{$html}</table></body></html>";
-            $psr7->respond(new Response(200, ['Content-Type' => 'text/html; charset=utf-8'], $body));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/html; charset=utf-8'], $body));
             continue 2;
 
          case '/updates':
@@ -172,7 +185,7 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
             continue 2;
 
          case '/cached-queries':
@@ -186,19 +199,19 @@ while ($request = $psr7->waitRequest()) {
             }
 
             $body = json_encode($Worlds, JSON_NUMERIC_CHECK) ?: '[]';
-            $psr7->respond(new Response(200, ['Content-Type' => 'application/json'], $body));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'application/json'], $body));
             continue 2;
 
          case '/':
             // Warmup/probe: the runner warms up with GET /.
-            $psr7->respond(new Response(200, ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark'));
+            $psr7->respond(new Response(200, $headers + ['Content-Type' => 'text/plain'], 'TechEmpower Benchmark'));
             continue 2;
 
          default:
-            $psr7->respond(new Response(404, ['Content-Type' => 'text/plain'], 'Not Found'));
+            $psr7->respond(new Response(404, $headers + ['Content-Type' => 'text/plain'], 'Not Found'));
             continue 2;
       }
    } catch (\Throwable $e) {
-      $psr7->respond(new Response(500, ['Content-Type' => 'text/plain'], 'Internal Server Error'));
+      $psr7->respond(new Response(500, $headers + ['Content-Type' => 'text/plain'], 'Internal Server Error'));
    }
 }

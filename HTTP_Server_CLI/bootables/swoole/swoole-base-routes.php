@@ -12,6 +12,9 @@
  * Usage: php swoole-base-routes.php
  */
 
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
+
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Swoole\Http\Server;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
@@ -62,6 +65,16 @@ for ($i = 11; $i <= 100; $i++) {
 }
 
 $Server->on('request', function (Request $request, Response $response) use ($static) {
+   if (WorkerEvidence::$enabled) {
+      $identity = WorkerEvidence::identify(
+         $request->header['x-bootgly-benchmark-warmup'] ?? null,
+         $request->header['x-bootgly-benchmark-seal'] ?? null,
+      );
+      if ($identity !== null) {
+         $response->header('X-Bootgly-Benchmark-Worker', $identity);
+      }
+   }
+
    $path = $request->server['request_uri'];
 
    $response->header('Content-Type', 'text/plain');

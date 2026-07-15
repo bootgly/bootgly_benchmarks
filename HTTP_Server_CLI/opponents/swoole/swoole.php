@@ -11,7 +11,7 @@
  *   techempower   -> swoole-techempower-postgres.php (the 7 TFB routes, per-worker PDO pool)
  *   anything else -> swoole-base-routes.php          (generic route set)
  *
- * Both bootables run in SWOOLE_BASE mode (SWOOLE_SERVER_MODE=base): every
+ * Both supported bootables run in SWOOLE_BASE mode: every
  * worker accepts its own connections via SO_REUSEPORT, which scales keep-alive
  * throughput far better than PROCESS mode's single master dispatcher
  * (+~27% on /plaintext, /json).
@@ -93,7 +93,7 @@ $exit = match ($action) {
       );
 
       return ServerCapture::run(
-         'cd ' . escapeshellarg($bootablesDir) . " && {$DB}SWOOLE_SERVER_MODE=base "
+         'cd ' . escapeshellarg($bootablesDir) . " && {$DB}"
          . 'SWOOLE_PID_FILE=' . escapeshellarg($PIDFile) . ' '
          . "SERVER_WORKER_NUM={$workers} SERVER_PORT={$port} "
          . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($bootable)

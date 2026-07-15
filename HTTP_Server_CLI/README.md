@@ -350,6 +350,7 @@ supports multi-worker forking and HTTP pipelining.
 | `--connections=N` | `514` | Number of TCP connections |
 | `--duration=N` | `10` | Benchmark duration in seconds |
 | `--pipeline=N` | `1` | HTTP pipelining factor |
+| `--warmup=N` | `5` | Per-load sustained warmup duration in seconds |
 
 ### Exact HTTP response accounting
 
@@ -429,11 +430,9 @@ All published opponents — `swoole`, `hyperf`, `workerman`, `roadrunner`, `reac
 `amphp` — implement all **seven** TechEmpower routes (including `/cached-queries`).
 **Laravel Octane** serves **six** (`/cached-queries` is deliberately **N/A** — see below).
 
-> **Swoole Process / Coroutine** modes are not standalone opponents — they live on as
-> bootables (`bootables/swoole/swoole-process-routes.php`, `…coroutine-routes.php`) for
-> ad-hoc mode comparisons. The `swoole` image ships the **one** `swoole` opponent, always
-> in `SWOOLE_BASE` mode; its bootable is derived from the load set (techempower → the
-> TFB PDO bootable, anything else → the generic route set).
+> The `swoole` image ships one opponent in `SWOOLE_BASE` mode. Its two supported
+> bootables are selected by load set: `swoole-techempower-postgres.php` for
+> TechEmpower and `swoole-base-routes.php` for the generic benchmark routes.
 
 > **Laravel** dropped its FPM/web-server stacks (`laravel-nginx`, `laravel-apache`,
 > `laravel-ols`): nginx/Apache need PHP-FPM (the base image is CLI-only) and OpenLiteSpeed
@@ -800,7 +799,18 @@ PASS: database wait did not block the single HTTP worker.
 - **Localhost loopback**: all tests run on `127.0.0.1` — network latency is not a factor.
 - **Swoole / Hyperf / Laravel Octane**: the Swoole extension (built `swoole.use_shortname=Off`) is baked into the `swoole`, `hyperf` and `laravel-octane` images — no host install.
 - **Result variance**: results vary by hardware, OS, PHP version, and system load. Always compare on the **same machine, same session**.
-- **Warmup**: a warmup phase runs before each benchmark to stabilize JIT, TCP buffers, and worker pools.
+- **Worker-aware warmup**: immediately before each measured load, the harness
+  runs that exact load for five seconds with the measured connection, client-
+  worker, and pipeline settings. It then opens independent `Connection: close`
+  probes in two rounds and requires the same set of exactly `server-workers`
+  identities, successful path/status/body validation, and closed TCP accounting.
+  A missing worker, changed generation, invalid response, process failure, or
+  inconsistent ledger makes that result `N/A`; the measurement window is never
+  opened. Each run retains a token-free `evidence.json` with coverage, counters,
+  failures, durations, effective settings, and the selected-load hash.
+- **FrankenPHP worker proof**: its current bootables do not yet expose the
+  worker-evidence response header. This revision therefore fails closed with an
+  `N/A` result for FrankenPHP instead of opening an unproved measurement window.
 
 ---
 

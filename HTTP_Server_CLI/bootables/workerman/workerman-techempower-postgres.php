@@ -1,7 +1,9 @@
 <?php
 require_once 'vendor/autoload.php';
 require_once __DIR__ . '/../../../runners/Profiles.php';
+require_once dirname(__DIR__) . '/WorkerEvidence.php';
 
+use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Workerman\Worker;
 use Workerman\Timer;
 use Workerman\Protocols\Http\Response;
@@ -97,20 +99,28 @@ $fetchWorld = function (PDOStatement $Statement, int $id): array {
 
 $http_worker->onMessage = function ($connection, Request $request) use (&$pdo, &$cachedWorlds, $clamp, $fetchWorld) {
     $path = $request->path();
+    $headers = [
+        'Content-Type' => 'text/plain',
+        'Date'         => Header::$date,
+    ];
+    if (WorkerEvidence::$enabled) {
+        $identity = WorkerEvidence::identify(
+            $request->header('x-bootgly-benchmark-warmup'),
+            $request->header('x-bootgly-benchmark-seal'),
+        );
+        if ($identity !== null) {
+            $headers['X-Bootgly-Benchmark-Worker'] = $identity;
+        }
+    }
 
     // TechEmpower /plaintext + /json: static, no DB. Handle early.
     if ($path === '/plaintext') {
-        $connection->send(new Response(200, [
-            'Content-Type' => 'text/plain',
-            'Date'         => Header::$date,
-        ], 'Hello, World!'));
+        $connection->send(new Response(200, $headers, 'Hello, World!'));
         return;
     }
     if ($path === '/json') {
-        $connection->send(new Response(200, [
-            'Content-Type' => 'application/json',
-            'Date'         => Header::$date,
-        ], '{"message":"Hello, World!"}'));
+        $headers['Content-Type'] = 'application/json';
+        $connection->send(new Response(200, $headers, '{"message":"Hello, World!"}'));
         return;
     }
 
@@ -199,30 +209,20 @@ $http_worker->onMessage = function ($connection, Request $request) use (&$pdo, &
 
             case '/':
                 // Warmup/probe — the runner warms up with GET /.
-                $connection->send(new Response(200, [
-                    'Content-Type' => 'text/plain',
-                    'Date'         => Header::$date,
-                ], 'TechEmpower Benchmark'));
+                $connection->send(new Response(200, $headers, 'TechEmpower Benchmark'));
                 return;
 
             default:
-                $connection->send(new Response(404, [
-                    'Content-Type' => 'text/plain',
-                    'Date'         => Header::$date,
-                ], 'Not Found'));
+                $connection->send(new Response(404, $headers, 'Not Found'));
                 return;
         }
 
-        $connection->send(new Response(200, [
-            'Content-Type' => $contentType,
-            'Date'         => Header::$date,
-        ], $body));
+        $headers['Content-Type'] = $contentType;
+        $connection->send(new Response(200, $headers, $body));
     }
     catch (Throwable $Throwable) {
-        $connection->send(new Response(500, [
-            'Content-Type' => 'text/plain',
-            'Date'         => Header::$date,
-        ], $Throwable->getMessage()));
+        $headers['Content-Type'] = 'text/plain';
+        $connection->send(new Response(500, $headers, $Throwable->getMessage()));
     }
 };
 

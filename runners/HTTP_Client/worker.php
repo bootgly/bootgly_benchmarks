@@ -146,19 +146,35 @@ function runWorker (
    string $method, array $paths, int $pathCount,
    ?string $statsFile
 ): void {
-   $responsesReceived = 0;
-   $requestIndex      = 0;
-   $startTime         = 0.0;
-   $latencySum        = 0.0;
-   $latencyCount      = 0;
+   $scheduled       = 0;
+   $sent            = 0;
+   $responses       = 0;
+   $concluded       = 0;
+   $requestIndex    = 0;
+   $startTime       = 0.0;
+   $latencySum      = 0.0;
+   $latencyCount    = 0;
+   $connectionFailed = 0;
+   $stopping        = false;
+   /** @var array<int,int> $statuses */
+   $statuses = [];
+   /** @var array<string,int> $failures */
+   $failures = [];
    /** @var array<int,float> $writeTimes */
-   $writeTimes        = [];
+   $writeTimes = [];
 
-   // @ Bootstrap HTTP Client
-   $Client = new HTTP_Client_CLI;
-   /** @var \Bootgly\ACI\Process $Process */
-   $Process = $Client->__get('Process');
-   $Process->State->lock(LOCK_UN);
+   // @ Once the requested window closes, stop replenishing and let already
+   //   scheduled requests receive one terminal classification. Timer uses
+   //   integer ticks, so a one-tick hard bound prevents a stalled drain.
+   $Finish = static function () use (&$stopping, &$scheduled, &$sent, &$concluded): void {
+      if ($stopping && $scheduled === $sent && $sent === $concluded) {
+         HTTP_Client_CLI::$Event->destroy();
+      }
+   };
+
+   // ? The runner owns process lifecycle. Test mode uses the same HTTP/event
+   //   engine without installing a self-signalling CLI shutdown process.
+   $Client = new HTTP_Client_CLI(HTTP_Client_CLI::MODE_TEST);
 
    $Client->configure(
       host: $host,
@@ -168,25 +184,53 @@ function runWorker (
 
    // @ Register HTTP hooks
    $Client
+      ->on(Events::ClientConnect, function () use (&$scheduled): void {
+         // @ One initial request is scheduled for each established connection.
+         $scheduled++;
+      })
       ->on(Events::WorkerStarted, function (HTTP_Client_CLI $Client)
-         use ($method, $paths, $pathCount, $workerConnections, $duration, &$requestIndex, &$startTime)
+         use (
+            $method,
+            $paths,
+            $pathCount,
+            $workerConnections,
+            $duration,
+            $Finish,
+            &$requestIndex,
+            &$startTime,
+            &$connectionFailed,
+            &$stopping,
+         )
       {
          // @ Prepare initial request
          $Client->request($method, $paths[$requestIndex++ % $pathCount]);
 
          // @ Open connections (auto-sends the pending request on each)
+         $connected = 0;
          for ($i = 0; $i < $workerConnections; $i++) {
             $socket = $Client->connect();
-            if ($socket === false) break;
+            if ($socket === false) {
+               break;
+            }
+            $connected++;
          }
+         $connectionFailed = $workerConnections - $connected;
 
          // @ Record start time
          $startTime = microtime(true);
 
-         // @ Set timer to stop the event loop after duration
+         // @ Close the traffic window, then drain only work already scheduled.
          Timer::add(
             interval: $duration,
-            handler: function () {
+            handler: function () use (&$stopping, $Finish): void {
+               $stopping = true;
+               $Finish();
+            },
+            persistent: false,
+         );
+         Timer::add(
+            interval: $duration + 1,
+            handler: static function (): void {
                HTTP_Client_CLI::$Event->destroy();
             },
             persistent: false,
@@ -196,50 +240,130 @@ function runWorker (
          HTTP_Client_CLI::$Event->loop();
       })
       ->on(Events::DataWrite, function ($Socket)
-         use (&$writeTimes, &$latencySum, &$latencyCount)
+         use ($Finish, &$sent, &$writeTimes, &$latencySum, &$latencyCount)
       {
-         $socketId = (int) $Socket;
+         $sent++;
+         $socketID = (int) $Socket;
          $now = microtime(true);
 
          // @ Compute latency from previous request on this socket
-         if (isset($writeTimes[$socketId])) {
-            $latencySum += $now - $writeTimes[$socketId];
+         if (isset($writeTimes[$socketID])) {
+            $latencySum += $now - $writeTimes[$socketID];
             $latencyCount++;
          }
 
-         $writeTimes[$socketId] = $now;
+         $writeTimes[$socketID] = $now;
+         $Finish();
       })
-      ->on(Events::ResponseReceive, function ()
-         use ($Client, $method, $paths, $pathCount, &$requestIndex, &$responsesReceived)
+      ->on(Events::ResponseReceive, function ($Request, $Response)
+         use (
+            $Client,
+            $method,
+            $paths,
+            $pathCount,
+            $Finish,
+            &$requestIndex,
+            &$scheduled,
+            &$responses,
+            &$concluded,
+            &$statuses,
+            &$failures,
+            &$stopping,
+         )
       {
-         $responsesReceived++;
+         $concluded++;
+         $status = (int) $Response->code;
+         if ($status >= 200 && $status <= 599) {
+            $responses++;
+            $statuses[$status] = ($statuses[$status] ?? 0) + 1;
+         }
+         else {
+            $reason = strtolower(trim((string) $Response->status));
+            $reason = preg_replace('/[^a-z0-9]+/', '_', $reason) ?? '';
+            $reason = trim($reason, '_');
+            $reason = $reason !== '' ? $reason : 'http_client_failure';
+            $failures[$reason] = ($failures[$reason] ?? 0) + 1;
+         }
 
-         // @ Queue next request (auto-sent by HTTP_Client_CLI)
-         $Client->request($method, $paths[$requestIndex++ % $pathCount]);
+         if (!$stopping) {
+            // @ Queue next request (auto-sent by HTTP_Client_CLI).
+            $scheduled++;
+            $Client->request($method, $paths[$requestIndex++ % $pathCount]);
+         }
+
+         $Finish();
       });
 
    $Client->start();
 
-   // @ Calculate results
+   // ! Reconcile the terminal cut. Fully written requests without a response
+   //   become measurement_ended failures; queued output that did not drain is
+   //   conservatively classified as a partial write failure.
    $elapsed = microtime(true) - $startTime;
    $bytesRead = HTTP_Client_CLI::$bytesReceived;
+   $writeFailed = max(0, $scheduled - $sent);
+   $terminalFailed = max(0, $sent - $concluded);
+   $writeFailures = $writeFailed > 0
+      ? ['measurement_ended' => $writeFailed]
+      : [];
+   if ($terminalFailed > 0) {
+      $failures['measurement_ended'] = ($failures['measurement_ended'] ?? 0) + $terminalFailed;
+   }
+   ksort($statuses);
+   ksort($failures);
+   ksort($writeFailures);
+   $failed = array_sum($failures);
+   $accounting = $connectionFailed === 0
+      && $scheduled === $sent + $writeFailed
+      && $sent === $responses + $failed
+      && $responses === array_sum($statuses);
+   $stats = [
+      'scheduled' => $scheduled,
+      'sent' => $sent,
+      'responses' => $responses,
+      'informational' => 0,
+      'outstanding' => 0,
+      'statuses' => $statuses,
+      'failures' => $failures,
+      'write_failures' => $writeFailures,
+      'connection_failures' => $connectionFailed,
+      'partial_writes' => $writeFailed,
+      'accounting' => $accounting,
+      'bytes_read' => $bytesRead,
+      'elapsed' => $elapsed,
+      'latency_sum' => $latencySum,
+      'latency_count' => $latencyCount,
+   ];
 
    if ($statsFile !== null) {
-      RunArtifacts::commit($statsFile, json_encode([
-         'responses' => $responsesReceived,
-         'bytes_read' => $bytesRead,
-         'elapsed' => $elapsed,
-         'latency_sum' => $latencySum,
-         'latency_count' => $latencyCount,
-      ], JSON_THROW_ON_ERROR));
-   } else {
-      outputResults($responsesReceived, $bytesRead, $elapsed, $latencySum, $latencyCount);
+      RunArtifacts::commit($statsFile, json_encode($stats, JSON_THROW_ON_ERROR));
+   }
+   else {
+      outputResults($stats);
    }
 }
 
-function outputResults (int $responses, int $bytesRead, float $elapsed, float $latencySum = 0.0, int $latencyCount = 0): void
+/** @param array<string,mixed> $stats */
+function outputResults (array $stats): void
 {
-   $rps = $elapsed > 0 ? $responses / $elapsed : 0.0;
+   $responses = (int) ($stats['responses'] ?? 0);
+   $bytesRead = (int) ($stats['bytes_read'] ?? 0);
+   $elapsed = (float) ($stats['elapsed'] ?? 0.0);
+   $latencySum = (float) ($stats['latency_sum'] ?? 0.0);
+   $latencyCount = (int) ($stats['latency_count'] ?? 0);
+   $failed = array_sum($stats['failures'] ?? []);
+   $writeFailed = array_sum($stats['write_failures'] ?? []);
+   $accounting = ($stats['accounting'] ?? false) === true
+      && is_finite($elapsed)
+      && $elapsed > 0
+      && is_finite($latencySum)
+      && $latencySum >= 0
+      && (int) ($stats['connection_failures'] ?? -1) === 0
+      && (int) ($stats['outstanding'] ?? -1) === 0
+      && (int) ($stats['scheduled'] ?? -1) === (int) ($stats['sent'] ?? -2) + $writeFailed
+      && (int) ($stats['sent'] ?? -1) === $responses + $failed
+      && $responses === array_sum($stats['statuses'] ?? []);
+   $RPS = $accounting ? $responses / $elapsed : null;
    $transferPerSec = $elapsed > 0 ? $bytesRead / $elapsed : 0.0;
    $avgLatency = $latencyCount > 0 ? ($latencySum / $latencyCount) : null;
 
@@ -264,9 +388,23 @@ function outputResults (int $responses, int $bytesRead, float $elapsed, float $l
    }
 
    echo json_encode([
-      'rps'      => \round($rps, 2),
+      'rps'      => $RPS !== null ? \round($RPS, 2) : null,
       'latency'  => $latencyStr,
       'transfer' => "{$transferStr}/s",
+      'elapsed' => $elapsed,
+      'scheduled' => (int) ($stats['scheduled'] ?? 0),
+      'sent' => (int) ($stats['sent'] ?? 0),
+      'responses' => $responses,
+      'informational' => (int) ($stats['informational'] ?? 0),
+      'outstanding' => (int) ($stats['outstanding'] ?? 0),
+      'failed' => $failed,
+      'write_failed' => $writeFailed,
+      'connection_failed' => (int) ($stats['connection_failures'] ?? 0),
+      'accounting' => $accounting,
+      'statuses' => (object) ($stats['statuses'] ?? []),
+      'failures' => (object) ($stats['failures'] ?? []),
+      'write_failures' => (object) ($stats['write_failures'] ?? []),
+      'partial_writes' => (int) ($stats['partial_writes'] ?? 0),
    ]);
 }
 
@@ -314,47 +452,104 @@ foreach ($childPIDs as $PID) {
       && \pcntl_wexitstatus($status) === 0;
 }
 
-// @ Aggregate only the exact file assigned to each successful child PID.
-$totalResponses  = 0;
-$totalBytesRead  = 0;
-$maxElapsed      = 0.0;
-$totalLatencySum   = 0.0;
-$totalLatencyCount = 0;
-$validAggregation = !$forkFailed && count($childPIDs) === $requestedWorkers;
+// @ Aggregate only closed accounting documents assigned to successful PIDs.
+$stats = [
+   'scheduled' => 0,
+   'sent' => 0,
+   'responses' => 0,
+   'informational' => 0,
+   'outstanding' => 0,
+   'statuses' => [],
+   'failures' => [],
+   'write_failures' => [],
+   'connection_failures' => 0,
+   'partial_writes' => 0,
+   'accounting' => !$forkFailed && count($childPIDs) === $requestedWorkers,
+   'bytes_read' => 0,
+   'elapsed' => 0.0,
+   'latency_sum' => 0.0,
+   'latency_count' => 0,
+];
+$integerFields = [
+   'scheduled', 'sent', 'responses', 'informational', 'outstanding',
+   'partial_writes', 'bytes_read', 'latency_count', 'connection_failures',
+];
 
 foreach ($childPIDs as $PID) {
    $file = $childFiles[$PID];
    $contents = @file_get_contents($file);
    $data = $contents === false ? null : json_decode($contents, true);
-   $elapsed = $data['elapsed'] ?? null;
-   $latencySum = $data['latency_sum'] ?? null;
+   $childElapsed = $data['elapsed'] ?? null;
+   $childLatency = $data['latency_sum'] ?? null;
    $valid = ($childStatuses[$PID] ?? false)
       && \is_array($data)
-      && \is_int($data['responses'] ?? null) && $data['responses'] >= 0
-      && \is_int($data['bytes_read'] ?? null) && $data['bytes_read'] >= 0
-      && \is_int($data['latency_count'] ?? null) && $data['latency_count'] >= 0
-      && (\is_int($elapsed) || \is_float($elapsed))
-      && \is_finite((float) $elapsed) && (float) $elapsed > 0
-      && (\is_int($latencySum) || \is_float($latencySum))
-      && \is_finite((float) $latencySum) && (float) $latencySum >= 0;
+      && \is_bool($data['accounting'] ?? null)
+      && \is_array($data['statuses'] ?? null)
+      && \is_array($data['failures'] ?? null)
+      && \is_array($data['write_failures'] ?? null)
+      && (\is_int($childElapsed) || \is_float($childElapsed))
+      && (\is_int($childLatency) || \is_float($childLatency))
+      && \is_finite((float) $childElapsed)
+      && (float) $childElapsed > 0
+      && \is_finite((float) $childLatency)
+      && (float) $childLatency >= 0;
 
-   if ($valid) {
-      $totalResponses += $data['responses'];
-      $totalBytesRead += $data['bytes_read'];
-      $maxElapsed = max($maxElapsed, (float) $elapsed);
-      $totalLatencySum += (float) $latencySum;
-      $totalLatencyCount += $data['latency_count'];
+   foreach ($integerFields as $field) {
+      $valid = $valid && \is_int($data[$field] ?? null) && $data[$field] >= 0;
    }
 
-   $validAggregation = $validAggregation && $valid;
+   if ($valid) {
+      foreach (['statuses', 'failures', 'write_failures'] as $map) {
+         foreach ($data[$map] as $key => $count) {
+            $valid = $valid && \is_int($count) && $count >= 0;
+            if ($map === 'statuses') {
+               $valid = $valid && \is_int($key) && $key >= 100 && $key <= 599;
+            }
+         }
+      }
+   }
+
+   $valid = $valid
+      && $data['accounting'] === true
+      && $data['connection_failures'] === 0
+      && $data['outstanding'] === 0
+      && $data['scheduled'] === $data['sent'] + array_sum($data['write_failures'])
+      && $data['sent'] === $data['responses'] + array_sum($data['failures'])
+      && $data['responses'] === array_sum($data['statuses']);
+
+   if ($valid) {
+      foreach ($integerFields as $field) {
+         $stats[$field] += $data[$field];
+      }
+      $stats['elapsed'] = max($stats['elapsed'], (float) $data['elapsed']);
+      $stats['latency_sum'] += (float) $data['latency_sum'];
+
+      foreach (['statuses', 'failures', 'write_failures'] as $map) {
+         foreach ($data[$map] as $key => $count) {
+            $stats[$map][$key] = ($stats[$map][$key] ?? 0) + $count;
+         }
+      }
+   }
+
+   $stats['accounting'] = $stats['accounting'] && $valid;
 }
 
-if (!$validAggregation) {
-   \fwrite(\STDERR, "ERROR: one or more benchmark workers failed or produced invalid stats.\n");
+ksort($stats['statuses']);
+ksort($stats['failures']);
+ksort($stats['write_failures']);
+$stats['accounting'] = $stats['accounting']
+   && $stats['connection_failures'] === 0
+   && $stats['outstanding'] === 0
+   && $stats['scheduled'] === $stats['sent'] + array_sum($stats['write_failures'])
+   && $stats['sent'] === $stats['responses'] + array_sum($stats['failures'])
+   && $stats['responses'] === array_sum($stats['statuses']);
+
+if (!$stats['accounting']) {
+   \fwrite(\STDERR, "ERROR: one or more benchmark workers produced invalid accounting.\n");
    $Artifacts->clean();
    exit(1);
 }
 
-outputResults($totalResponses, $totalBytesRead, $maxElapsed, $totalLatencySum, $totalLatencyCount);
+outputResults($stats);
 $Artifacts->clean();
 exit(0);

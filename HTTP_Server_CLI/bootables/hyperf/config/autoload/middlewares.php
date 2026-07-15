@@ -6,5 +6,7 @@
 declare(strict_types=1);
 
 return [
-   'http' => [],
+   'http' => [
+      App\WorkerEvidenceMiddleware::class,
+   ],
 ];

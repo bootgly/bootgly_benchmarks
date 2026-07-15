@@ -533,6 +533,7 @@ function outputResults (array $stats): void
       'rps'      => $RPS !== null ? \round($RPS, 2) : null,
       'latency'  => $latencyStr,
       'transfer' => "{$transferStr}/s",
+      'elapsed' => $elapsed,
       'scheduled' => (int) ($stats['scheduled'] ?? 0),
       'sent' => (int) ($stats['sent'] ?? 0),
       'responses' => $responses,

@@ -19,12 +19,14 @@ use Bootgly\Benchmarks\Runners\RunProcess;
 use Bootgly\Benchmarks\Runners\ServerReadiness;
 use Bootgly\Benchmarks\Runners\WorkerGeneration;
 use Bootgly\Benchmarks\Runners\WorkerGenerationFailure;
+use Bootgly\Benchmarks\Runners\WorkerResult;
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
 use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 
 require_once __DIR__ . '/RunArtifacts.php';
 require_once __DIR__ . '/ServerReadiness.php';
 require_once __DIR__ . '/WorkerGeneration.php';
+require_once __DIR__ . '/WorkerResult.php';
 require_once __DIR__ . '/WorkerWarmup.php';
 
 
@@ -155,7 +157,12 @@ return new class (
          return $this->workers;
       }
 
-      return max(1, (int) ((int)(exec('nproc 2>/dev/null') ?: 1) / 2));
+      // ! 0.6 × logical CPUs (was 0.5). The accounting/latency-fidelity client
+      //   costs more CPU per request than the legacy chunk counter, and at
+      //   0.5 × nproc it becomes the closed-loop bottleneck before the server
+      //   saturates (measured on 24 CPUs: 12 workers → ~849k rps, 14 → ~893k
+      //   against the same live server; 16 regresses on contention).
+      return max(1, (int) round((int)(exec('nproc 2>/dev/null') ?: 1) * 0.6));
    }
    /**
     * @return array<string,array<string,string>>
@@ -1067,77 +1074,6 @@ return new class (
    }
    private function parse (string $output): Result
    {
-      /** @var array<string,mixed>|null $data */
-      $data = json_decode($output, true);
-      if (!\is_array($data)) {
-         return new Result();
-      }
-
-      $statuses = \is_array($data['statuses'] ?? null) ? $data['statuses'] : [];
-      $failures = \is_array($data['failures'] ?? null) ? $data['failures'] : [];
-      $writeFailures = \is_array($data['write_failures'] ?? null) ? $data['write_failures'] : [];
-      $counters = [
-         'scheduled', 'sent', 'responses', 'informational', 'outstanding',
-         'failed', 'write_failed', 'connection_failed', 'partial_writes',
-      ];
-      $valid = true;
-
-      foreach ($counters as $counter) {
-         $valid = $valid && \is_int($data[$counter] ?? null) && $data[$counter] >= 0;
-      }
-      foreach ([$statuses, $failures, $writeFailures] as $counts) {
-         foreach ($counts as $count) {
-            $valid = $valid && \is_int($count) && $count >= 0;
-         }
-      }
-      /** @var array<int,int> $statuses Worker-output values were validated above. */
-      /** @var array<string,int> $failures Worker-output values were validated above. */
-      /** @var array<string,int> $writeFailures Worker-output values were validated above. */
-      $Integer = static function (mixed $value): int {
-         // Preserve the existing worker-output diagnostic coercion in one boundary.
-         // @phpstan-ignore cast.int
-         return (int) $value;
-      };
-      $Stringify = static function (mixed $value): string {
-         // Preserve the existing worker-output diagnostic coercion in one boundary.
-         // @phpstan-ignore cast.string
-         return (string) $value;
-      };
-      $RPS = $data['rps'] ?? null;
-      $validRPS = (\is_int($RPS) || \is_float($RPS))
-         && \is_finite((float) $RPS)
-         && (float) $RPS >= 0;
-
-      $accounting = $valid
-         && $validRPS
-         && ($data['accounting'] ?? false) === true
-         && $Integer($data['connection_failed'] ?? 0) === 0
-         && $Integer($data['outstanding'] ?? 0) === 0
-         && $Integer($data['scheduled'] ?? 0) === $Integer($data['sent'] ?? 0) + $Integer($data['write_failed'] ?? 0)
-         && $Integer($data['sent'] ?? 0) === $Integer($data['responses'] ?? 0) + $Integer($data['failed'] ?? 0)
-         && $Integer($data['failed'] ?? 0) === \array_sum($failures)
-         && $Integer($data['write_failed'] ?? 0) === \array_sum($writeFailures)
-         && $Integer($data['responses'] ?? 0) === \array_sum($statuses);
-
-      return new Result(
-         // ! Throughput is reportable only after the worker proves both
-         //   request/response accounting equations.
-         rps: $accounting ? (float) $RPS : null,
-         latency: isset($data['latency']) ? $Stringify($data['latency']) : null,
-         transfer: isset($data['transfer']) ? $Stringify($data['transfer']) : null,
-         scheduled: isset($data['scheduled']) ? $Integer($data['scheduled']) : null,
-         sent: isset($data['sent']) ? $Integer($data['sent']) : null,
-         responses: isset($data['responses']) ? $Integer($data['responses']) : null,
-         informational: isset($data['informational']) ? $Integer($data['informational']) : null,
-         outstanding: isset($data['outstanding']) ? $Integer($data['outstanding']) : null,
-         failed: isset($data['failed']) ? $Integer($data['failed']) : null,
-         writeFailed: isset($data['write_failed']) ? $Integer($data['write_failed']) : null,
-         connectionFailed: isset($data['connection_failed']) ? $Integer($data['connection_failed']) : null,
-         partialWrites: isset($data['partial_writes']) ? $Integer($data['partial_writes']) : null,
-         accounting: $accounting,
-         statuses: $statuses,
-         failures: $failures,
-         writeFailures: $writeFailures,
-      );
+      return WorkerResult::parse($output);
    }
 };

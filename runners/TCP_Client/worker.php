@@ -41,6 +41,8 @@ if (!\defined('BOOTGLY_VERSION')) {
 
 require_once __DIR__ . '/../Profiles.php';
 require_once __DIR__ . '/../RunArtifacts.php';
+require_once __DIR__ . '/../MeasurementBarrier.php';
+require_once __DIR__ . '/../WorkerTelemetry.php';
 
 \spl_autoload_register(function (string $class) {
    $paths = \explode('\\', $class);
@@ -54,13 +56,16 @@ require_once __DIR__ . '/../RunArtifacts.php';
 });
 
 
-use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Data\Display;
 use Bootgly\ACI\Tests\Benchmark\HTTP\Tracker;
+use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
+use Bootgly\ACI\Tests\Benchmark\Time\Series;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI\Events;
+use Bootgly\Benchmarks\Runners\MeasurementBarrier;
 use Bootgly\Benchmarks\Runners\Profiles;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
+use Bootgly\Benchmarks\Runners\WorkerTelemetry;
 
 
 // ---------------------------------------------------------------------------
@@ -85,8 +90,8 @@ $pathsFile   = $opts['paths-file']  ?? '';
 $pipeline    = (int) ($opts['pipeline']    ?? 1);
 if ($pipeline < 1) $pipeline = 1;
 
-if ($connections < 1 || $duration < 1) {
-   \fwrite(\STDERR, "ERROR: --connections and --duration must be positive integers.\n");
+if ($connections < 1 || $duration < 1 || $duration > 3_600) {
+   \fwrite(\STDERR, "ERROR: --connections must be positive and --duration must be between 1 and 3600 seconds.\n");
    exit(1);
 }
 
@@ -116,7 +121,7 @@ if (
    exit(1);
 }
 
-/** @var array{method: string, paths: array<string>} $load */
+/** @var array{method: mixed, paths: array<mixed>} $load */
 $load = $decoded;
 
 $method    = $load['method'];
@@ -136,6 +141,8 @@ foreach ($paths as $path) {
       exit(1);
    }
 }
+/** @var string $method */
+/** @var array<string> $paths */
 
 // @ Pre-build raw HTTP request bytes (zero allocation in hot path)
 /** @var array<string> $requests */
@@ -167,12 +174,6 @@ $connectionsPerWorker = (int) \ceil($connections / $requestedWorkers);
 // Suppress log output — we only want the JSON result on stdout
 // ---------------------------------------------------------------------------
 Display::show(Display::NONE);
-
-
-// ---------------------------------------------------------------------------
-// Install SIGALRM handler for Timer BEFORE fork (children inherit it)
-// ---------------------------------------------------------------------------
-\pcntl_signal(SIGALRM, [Timer::class, 'tick']);
 
 
 // ---------------------------------------------------------------------------
@@ -209,16 +210,29 @@ function runWorker (
    string $host, int $port, int $workerConnections, int $duration,
    string $method, array $requests, array $requestLengths, int $pathCount,
    array $pipelinedRequests, array $pipelinedLengths, int $pipelinePathCount,
-   ?string $statsFile
+   ?string $statsFile, mixed $Channel = null,
 ): void {
    $bytesRead    = 0;
    $requestIndex = 0;
-   $startTime    = 0.0;
-   $latencySum   = 0.0;
-   $latencyCount = 0;
    $connectionFailed = 0;
-   /** @var array<int,float> $writeTimes */
-   $writeTimes = [];
+   $originNS = 0;
+   $deadlineNS = 0;
+   $startLagNS = 0;
+   $Histogram = new Histogram($duration * 1_000_000_000);
+   // ? Replaced with the aligned absolute window before the reactor starts.
+   $Series = new Series(0, $duration * 1_000_000_000);
+   // # Per-bucket batch for the hot-path Series counters. accumulate() is a
+   //   validated transactional call — invoking it per request/response cycle
+   //   costs two 8-arg calls plus ~12 guards and an intdiv per cycle at
+   //   ~1M cycles/s. Buffer the three hot counters in scalars and flush once
+   //   per 1-second bucket (and at every exit path), attributing the batch
+   //   to a timestamp inside its own bucket. Totals and per-bucket values
+   //   are byte-identical to the unbatched form.
+   $batchAtNS = 0;
+   $batchEndNS = 0;
+   $batchSent = 0;
+   $batchResponses = 0;
+   $batchBytes = 0;
    /** @var array<int,Tracker> $Trackers */
    $Trackers = [];
    /** @var array<int,\Bootgly\WPI\Interfaces\TCP_Client_CLI\Connections\Connection> $Connections */
@@ -252,21 +266,34 @@ function runWorker (
       workers: 0,
    );
 
+   // # Flush the batched hot counters into the Series, attributing them to a
+   //   timestamp inside their own 1-second bucket. Cheap no-op when empty.
+   $flush = function () use (&$Series, &$batchAtNS, &$batchSent, &$batchResponses, &$batchBytes): void {
+      if (($batchSent | $batchResponses | $batchBytes) !== 0) {
+         $Series->accumulate($batchAtNS, $batchSent, $batchResponses, $batchBytes);
+         $batchSent = 0;
+         $batchResponses = 0;
+         $batchBytes = 0;
+      }
+   };
+
    $Client->on(
       Events::WorkerStarted,
       function (TCP_Client_CLI $Client)
          use ($workerConnections, $method, $requests, $requestLengths, $pathCount,
               $pipelinedRequests, $pipelinedLengths, $pipelinePathCount, $duration,
-              &$bytesRead, &$requestIndex, &$startTime, &$latencySum, &$latencyCount,
-              &$connectionFailed, &$writeTimes, &$Trackers, &$Connections)
+              $Histogram, $Channel, &$bytesRead, &$requestIndex, &$connectionFailed,
+              &$originNS, &$deadlineNS, &$startLagNS, &$Series,
+              &$Trackers, &$Connections,
+              $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
       {
          TCP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
             use ($method, $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
-                 &$requestIndex, &$Trackers, &$Connections)
+                 $Histogram, &$requestIndex, &$Trackers, &$Connections)
          {
             // @ Fill pipeline: send initial burst of N requests
             $index = $requestIndex % $pipelinePathCount;
-            $Tracker = new Tracker($method);
+            $Tracker = new Tracker($method, Histogram: $Histogram);
             $Tracker->queue($pipelinedLengths[$index]);
             $Trackers[$Connection->id] = $Tracker;
             $Connections[$Connection->id] = $Connection;
@@ -275,61 +302,118 @@ function runWorker (
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
          };
 
-         TCP_Client_CLI::$onDataWrite = function ($Socket, $Connection, $Package)
-            use (&$writeTimes, &$Trackers)
+         TCP_Client_CLI::$onDataProgress = function (
+            $Socket, $Connection, $Package, int $accepted, int $remaining
+         ) use (&$deadlineNS, &$Trackers,
+                $flush, &$batchAtNS, &$batchEndNS, &$batchSent): void
          {
+            $nowNS = (int) \hrtime(true);
+            if ($nowNS >= $deadlineNS) {
+               return;
+            }
+
             $socketID = $Connection->id;
             if (isset($Trackers[$socketID])) {
-               // @ Packages::writing() exposes the authoritative unsent suffix.
-               $Trackers[$socketID]->accept(\strlen($Connection->output));
+               $sent = $Trackers[$socketID]->accept($remaining, $nowNS);
+               if ($sent > 0) {
+                  if ($nowNS >= $batchEndNS) {
+                     $flush();
+                     $batchAtNS = $nowNS;
+                     $batchEndNS += (\intdiv($nowNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+                  }
+                  $batchSent += $sent;
+               }
             }
-            $writeTimes[$socketID] = microtime(true);
+         };
+
+         TCP_Client_CLI::$onDataWrite = function ($Socket, $Connection, $Package)
+         {
             // @ Switch to read mode (remove from writes to prevent duplicate sends)
             TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_WRITE);
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
          };
 
          TCP_Client_CLI::$onClientDisconnect = function ($Connection)
-            use (&$Trackers, &$Connections, &$writeTimes, &$latencySum, &$latencyCount)
+            use (&$deadlineNS, &$Series, &$Trackers, &$Connections)
          {
             $socketID = $Connection->id;
             if (isset($Trackers[$socketID])) {
-               // ! Reconcile accepted bytes before classifying unfinished requests.
+               $nowNS = (int) \hrtime(true);
                $Tracker = $Trackers[$socketID];
-               $Tracker->accept(\strlen($Connection->output));
-               $count = $Tracker->close($Connection->peerEOF);
-
-               // ? An EOF-delimited response becomes complete only at clean EOF.
-               if ($count > 0 && isset($writeTimes[$socketID])) {
-                  $latencySum += (microtime(true) - $writeTimes[$socketID]) * $count;
-                  $latencyCount += $count;
+               if ($nowNS < $deadlineNS) {
+                  $sent = $Tracker->accept(\strlen($Connection->output), $nowNS);
+                  $count = $Tracker->close($Connection->peerEOF, $nowNS);
+                  $metrics = [];
+                  if ($sent > 0) {
+                     $metrics['sent'] = $sent;
+                  }
+                  if ($count > 0) {
+                     $metrics['responses'] = $count;
+                  }
+                  $snapshot = $Tracker->inspect();
+                  $failed = \array_sum($snapshot['failures']);
+                  $writeFailed = \array_sum($snapshot['write_failures']);
+                  if ($failed > 0) {
+                     $metrics['failed'] = $failed;
+                  }
+                  if ($writeFailed > 0) {
+                     $metrics['write_failed'] = $writeFailed;
+                  }
+                  if ($metrics !== []) {
+                     $Series->record($nowNS, $metrics);
+                  }
+               }
+               else {
+                  $Tracker->censor();
+                  $snapshot = $Tracker->inspect();
+                  $metrics = [];
+                  $censored = \array_sum($snapshot['censors']);
+                  $writeCensored = \array_sum($snapshot['write_censors']);
+                  if ($censored > 0) {
+                     $metrics['censored'] = $censored;
+                  }
+                  if ($writeCensored > 0) {
+                     $metrics['write_censored'] = $writeCensored;
+                  }
+                  if ($metrics !== []) {
+                     $Series->record($deadlineNS - 1, $metrics);
+                  }
                }
             }
 
-            unset($Connections[$socketID], $writeTimes[$socketID]);
+            unset($Connections[$socketID]);
          };
 
          TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
             use ($requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
-                 &$latencySum, &$latencyCount, &$writeTimes, &$Trackers)
+                 &$deadlineNS, &$Trackers,
+                 $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
          {
-            $input = $Package->input;
-            $bytesRead += \strlen($input);
+            $nowNS = (int) \hrtime(true);
+            if ($nowNS >= $deadlineNS) {
+               return;
+            }
 
-            $socketID = $Connection->id;
-            if (isset($Trackers[$socketID]) === false) {
+            $input = $Package->input;
+            $inputBytes = \strlen($input);
+            $bytesRead += $inputBytes;
+
+            $Tracker = $Trackers[$Connection->id] ?? null;
+            if ($Tracker === null) {
                $Connection->close();
                return;
             }
 
-            $Tracker = $Trackers[$socketID];
-            $count = $Tracker->feed($input);
+            $count = $Tracker->feed($input, $nowNS);
 
-            if ($count > 0 && isset($writeTimes[$socketID])) {
-               $latency = microtime(true) - $writeTimes[$socketID];
-               $latencySum += $latency * $count;
-               $latencyCount += $count;
-               unset($writeTimes[$socketID]);
+            if ($inputBytes > 0 || $count > 0) {
+               if ($nowNS >= $batchEndNS) {
+                  $flush();
+                  $batchAtNS = $nowNS;
+                  $batchEndNS += (\intdiv($nowNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+               }
+               $batchResponses += $count;
+               $batchBytes += $inputBytes;
             }
 
             // ! A malformed stream has already been classified by Tracker;
@@ -370,22 +454,48 @@ function runWorker (
             // @ Direct write: a keep-alive socket that just delivered a response is
             //   almost always writable — skip the EVENT_WRITE round-trip (saves one
             //   select() round + 4 event-set mutations per request/response cycle).
-            $sent = @\fwrite($Socket, $burst);
-            $accepted = $sent === false ? 0 : (int) $sent;
+            //   No fresh deadline read before the write: the post-write $sentNS
+            //   check below already classifies a boundary-crossing send as
+            //   queued (censored later) instead of in-window sent work.
+            $written = @\fwrite($Socket, $burst);
+            $accepted = $written === false ? 0 : (int) $written;
             $remaining = $length - $accepted;
+            $sentNS = (int) \hrtime(true);
 
             if ($remaining === 0) {
-               // @ No write ledger allocation is needed after the socket has
-               //   accepted every request byte atomically.
-               $Tracker->send($count);
-               $writeTimes[$socketID] = microtime(true);
+               if ($sentNS < $deadlineNS) {
+                  // @ No write ledger allocation is needed after the socket has
+                  //   accepted every request byte atomically.
+                  $Tracker->send($count, $sentNS);
+                  if ($sentNS >= $batchEndNS) {
+                     $flush();
+                     $batchAtNS = $sentNS;
+                     $batchEndNS += (\intdiv($sentNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+                  }
+                  $batchSent += $count;
+               }
+               else {
+                  // ! The syscall crossed the half-open measurement boundary;
+                  //   retain scheduling but classify it outside primary sent work.
+                  $Tracker->queue($count === 1 ? $length : $lengths);
+               }
                return; // stay registered for EVENT_READ
             }
 
             // @ Partial/failed write — defer the remainder to the event loop
             //   (onDataWrite flips the connection back to read mode after flush).
             $Tracker->queue($count === 1 ? $length : $lengths);
-            $Tracker->accept($remaining);
+            if ($sentNS < $deadlineNS) {
+               $completed = $Tracker->accept($remaining, $sentNS);
+               if ($completed > 0) {
+                  if ($sentNS >= $batchEndNS) {
+                     $flush();
+                     $batchAtNS = $sentNS;
+                     $batchEndNS += (\intdiv($sentNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+                  }
+                  $batchSent += $completed;
+               }
+            }
             $Connection->output = \substr($burst, $accepted);
             TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
@@ -398,38 +508,73 @@ function runWorker (
          }
          $connectionFailed = $workerConnections - \count($Trackers);
 
-         // @ Record start time
-         $startTime = microtime(true);
+         // # Align every forked load worker before allowing its reactor to
+         //   process the already-registered initial writes.
+         if (\is_resource($Channel)) {
+            $window = MeasurementBarrier::signal($Channel, \count($Trackers));
+            \fclose($Channel);
+            $originNS = $window['origin_ns'];
+            $deadlineNS = $window['deadline_ns'];
+            $startLagNS = $window['start_lag_ns'];
+         }
+         else {
+            $originNS = (int) \hrtime(true);
+            $deadlineNS = $originNS + ($duration * 1_000_000_000);
+            $startLagNS = 0;
+         }
+         $Series = new Series($originNS, $deadlineNS);
+         // ! Rebase the hot-counter batch onto the aligned window.
+         $batchAtNS = $originNS;
+         $batchEndNS = $originNS + 1_000_000_000;
+         $batchSent = 0;
+         $batchResponses = 0;
+         $batchBytes = 0;
 
-         // @ Set timer to stop the event loop after duration
-         Timer::add(
-            interval: $duration,
-            handler: function () {
+         TCP_Client_CLI::$Event->defer(
+            $deadlineNS,
+            static function (): void {
                TCP_Client_CLI::$Event->destroy();
             },
-            persistent: false,
          );
 
-         // @ Enter event loop (blocks until Timer destroys it)
+         // @ Enter the reactor until its absolute monotonic deadline.
          TCP_Client_CLI::$Event->loop();
       }
    );
 
    $Client->start();
 
-   // ! The duration timer only stops the reactor. Reconcile each live output
-   //   suffix, then give every scheduled request one terminal classification.
+   // ! Publish the final partial bucket before any export/censor accounting.
+   $flush();
+
+   // ! Give every request still live at the half-open deadline a non-error
+   //   terminal classification. Do not reinterpret post-deadline socket state
+   //   as in-window write progress.
    foreach ($Connections as $socketID => $Connection) {
       if (isset($Trackers[$socketID])) {
-         $Trackers[$socketID]->accept(\strlen($Connection->output));
-         $Trackers[$socketID]->abort('measurement_ended');
+         $Tracker = $Trackers[$socketID];
+         $Tracker->censor();
+         $snapshot = $Tracker->inspect();
+         $metrics = [];
+         $censored = \array_sum($snapshot['censors']);
+         $writeCensored = \array_sum($snapshot['write_censors']);
+         if ($censored > 0) {
+            $metrics['censored'] = $censored;
+         }
+         if ($writeCensored > 0) {
+            $metrics['write_censored'] = $writeCensored;
+         }
+         if ($metrics !== []) {
+            $Series->record($deadlineNS - 1, $metrics);
+         }
       }
    }
 
-   // @ Calculate results
-   $elapsed = microtime(true) - $startTime;
+   // @ Calculate results from the declared monotonic window, not scheduler lag.
+   $elapsed = ($deadlineNS - $originNS) / 1_000_000_000;
 
    $stats = [
+      'schema' => 'bootgly.benchmark-worker.v2',
       'scheduled' => 0,
       'sent' => 0,
       'responses' => 0,
@@ -437,14 +582,15 @@ function runWorker (
       'outstanding' => 0,
       'statuses' => [],
       'failures' => [],
+      'censors' => [],
       'write_failures' => [],
+      'write_censors' => [],
       'connection_failures' => $connectionFailed,
       'partial_writes' => 0,
       'accounting' => $connectionFailed === 0,
       'bytes_read' => $bytesRead,
       'elapsed' => $elapsed,
-      'latency_sum' => $latencySum,
-      'latency_count' => $latencyCount,
+      'start_lag_ns' => $startLagNS,
    ];
 
    foreach ($Trackers as $Tracker) {
@@ -452,7 +598,7 @@ function runWorker (
       foreach (['scheduled', 'sent', 'responses', 'informational', 'outstanding', 'partial_writes'] as $key) {
          $stats[$key] += $snapshot[$key];
       }
-      foreach (['statuses', 'failures', 'write_failures'] as $map) {
+      foreach (['statuses', 'failures', 'censors', 'write_failures', 'write_censors'] as $map) {
          foreach ($snapshot[$map] as $key => $count) {
             $stats[$map][$key] = ($stats[$map][$key] ?? 0) + $count;
          }
@@ -462,92 +608,48 @@ function runWorker (
 
    \ksort($stats['statuses']);
    \ksort($stats['failures']);
+   \ksort($stats['censors']);
    \ksort($stats['write_failures']);
+   \ksort($stats['write_censors']);
    $failed = \array_sum($stats['failures']);
+   $censored = \array_sum($stats['censors']);
    $writeFailed = \array_sum($stats['write_failures']);
+   $writeCensored = \array_sum($stats['write_censors']);
+   $latencySummary = $Histogram->inspect();
+   $series = $Series->export();
    $stats['accounting'] = $stats['accounting']
       && $stats['connection_failures'] === 0
       && $stats['outstanding'] === 0
-      && $stats['scheduled'] === $stats['sent'] + $writeFailed
-      && $stats['sent'] === $stats['responses'] + $failed
-      && $stats['responses'] === \array_sum($stats['statuses']);
+      && $stats['scheduled'] === $stats['sent'] + $writeFailed + $writeCensored
+      && $stats['sent'] === $stats['responses'] + $failed + $censored
+      && $stats['responses'] === \array_sum($stats['statuses'])
+      && $latencySummary['fidelity'] === true
+      && $latencySummary['count'] === $stats['responses']
+      && $series['totals']['sent'] === $stats['sent']
+      && $series['totals']['responses'] === $stats['responses']
+      && $series['totals']['failed'] === $failed
+      && $series['totals']['censored'] === $censored
+      && $series['totals']['write_failed'] === $writeFailed
+      && $series['totals']['write_censored'] === $writeCensored
+      && $series['totals']['bytes_read'] === $stats['bytes_read'];
+   $stats['latency_summary'] = $latencySummary;
+   $stats['latency_histogram'] = $Histogram->export();
+   $stats['time_series'] = $series;
+
+   $Telemetry = WorkerTelemetry::import($stats, $elapsed);
+   if ($Telemetry === null) {
+      throw new \RuntimeException('The TCP load worker produced structurally invalid telemetry.');
+   }
 
    if ($statsFile !== null) {
-      // Multi-worker mode: publish one atomic file assigned to this child PID.
-      RunArtifacts::commit($statsFile, json_encode($stats, JSON_THROW_ON_ERROR));
-   } else {
-      // Single-worker mode: output directly
-      outputResults($stats);
+      RunArtifacts::commit(
+         $statsFile,
+         json_encode($Telemetry->export(), JSON_THROW_ON_ERROR),
+      );
    }
-}
-
-/**
- * @param array<string,mixed> $stats Closed worker accounting plus timing data.
- */
-function outputResults (array $stats): void
-{
-   $responses = (int) ($stats['responses'] ?? 0);
-   $bytesRead = (int) ($stats['bytes_read'] ?? 0);
-   $elapsed = (float) ($stats['elapsed'] ?? 0.0);
-   $latencySum = (float) ($stats['latency_sum'] ?? 0.0);
-   $latencyCount = (int) ($stats['latency_count'] ?? 0);
-   $failed = \array_sum($stats['failures'] ?? []);
-   $writeFailed = \array_sum($stats['write_failures'] ?? []);
-   $accounting = ($stats['accounting'] ?? false) === true
-      && \is_finite($elapsed)
-      && $elapsed > 0
-      && \is_finite($latencySum)
-      && $latencySum >= 0
-      && (int) ($stats['connection_failures'] ?? -1) === 0
-      && (int) ($stats['outstanding'] ?? -1) === 0
-      && (int) ($stats['scheduled'] ?? -1) === (int) ($stats['sent'] ?? -2) + $writeFailed
-      && (int) ($stats['sent'] ?? -1) === $responses + $failed
-      && $responses === \array_sum($stats['statuses'] ?? []);
-   $RPS = $accounting && $elapsed > 0 ? $responses / $elapsed : null;
-   $transferPerSec = $elapsed > 0 ? $bytesRead / $elapsed : 0.0;
-   $avgLatency = $latencyCount > 0 ? ($latencySum / $latencyCount) : null;
-
-   if ($transferPerSec >= 1_073_741_824) {
-      $transferStr = \number_format($transferPerSec / 1_073_741_824, 2) . 'GB';
-   } elseif ($transferPerSec >= 1_048_576) {
-      $transferStr = \number_format($transferPerSec / 1_048_576, 2) . 'MB';
-   } elseif ($transferPerSec >= 1024) {
-      $transferStr = \number_format($transferPerSec / 1024, 2) . 'KB';
-   } else {
-      $transferStr = \number_format($transferPerSec, 0) . 'B';
+   else {
+      echo $Telemetry->render();
    }
-
-   // @ Format latency
-   $latencyStr = null;
-   if ($avgLatency !== null) {
-      if ($avgLatency >= 1.0) {
-         $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
-      } elseif ($avgLatency >= 0.001) {
-         $latencyStr = \number_format($avgLatency * 1000, 2) . 'ms';
-      } else {
-         $latencyStr = \number_format($avgLatency * 1_000_000, 2) . 'us';
-      }
-   }
-
-   echo json_encode([
-      'rps'      => $RPS !== null ? \round($RPS, 2) : null,
-      'latency'  => $latencyStr,
-      'transfer' => "{$transferStr}/s",
-      'elapsed' => $elapsed,
-      'scheduled' => (int) ($stats['scheduled'] ?? 0),
-      'sent' => (int) ($stats['sent'] ?? 0),
-      'responses' => $responses,
-      'informational' => (int) ($stats['informational'] ?? 0),
-      'outstanding' => (int) ($stats['outstanding'] ?? 0),
-      'failed' => $failed,
-      'write_failed' => $writeFailed,
-      'connection_failed' => (int) ($stats['connection_failures'] ?? 0),
-      'accounting' => $accounting,
-      'statuses' => (object) ($stats['statuses'] ?? []),
-      'failures' => (object) ($stats['failures'] ?? []),
-      'write_failures' => (object) ($stats['write_failures'] ?? []),
-      'partial_writes' => (int) ($stats['partial_writes'] ?? 0),
-   ]);
 }
 
 
@@ -567,27 +669,55 @@ $Artifacts = RunArtifacts::create('tcp-client-workers');
 $childPIDs = [];
 $childFiles = [];
 $childStatuses = [];
+$Channels = [];
 $forkFailed = false;
 $baseConnections = \intdiv($connections, $requestedWorkers);
 $extraConnections = $connections % $requestedWorkers;
 
 for ($w = 0; $w < $requestedWorkers; $w++) {
    $workerConnections = $baseConnections + ($w < $extraConnections ? 1 : 0);
+   [$ParentChannel, $ChildChannel] = MeasurementBarrier::pair();
    $PID = \pcntl_fork();
 
    if ($PID === 0) {
       // Child process
+      \fclose($ParentChannel);
       $statsFile = $Artifacts->resolve('child-' . \getmypid() . '.json');
       runWorker($host, $port, $workerConnections, $duration,
                 $method, $requests, $requestLengths, $pathCount,
-                $pipelinedRequests, $pipelinedLengths, $pipelinePathCount, $statsFile);
+                $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
+                $statsFile, $ChildChannel);
       exit(0);
    } elseif ($PID > 0) {
+      \fclose($ChildChannel);
       $childPIDs[] = $PID;
       $childFiles[$PID] = $Artifacts->resolve("child-{$PID}.json");
+      $Channels[$PID] = $ParentChannel;
    } else {
+      \fclose($ParentChannel);
+      \fclose($ChildChannel);
       $forkFailed = true;
       \fwrite(\STDERR, "ERROR: pcntl_fork() failed.\n");
+   }
+}
+
+// # Do not release any child until every successfully forked worker has
+//   established its assigned connections and proved readiness on its PID-bound
+//   control channel.
+if ($Channels !== []) {
+   try {
+      MeasurementBarrier::release($Channels, $duration);
+   }
+   catch (\Throwable $Throwable) {
+      $forkFailed = true;
+      \fwrite(\STDERR, 'ERROR: ' . $Throwable->getMessage() . "\n");
+   }
+   finally {
+      foreach ($Channels as $Channel) {
+         if (\is_resource($Channel)) {
+            \fclose($Channel);
+         }
+      }
    }
 }
 
@@ -599,103 +729,46 @@ foreach ($childPIDs as $PID) {
       && \pcntl_wexitstatus($status) === 0;
 }
 
-// @ Aggregate only the exact files assigned to successful child PIDs.
-$stats = [
-   'scheduled' => 0,
-   'sent' => 0,
-   'responses' => 0,
-   'informational' => 0,
-   'outstanding' => 0,
-   'statuses' => [],
-   'failures' => [],
-   'write_failures' => [],
-   'connection_failures' => 0,
-   'partial_writes' => 0,
-   'accounting' => $forkFailed === false && \count($childPIDs) === $requestedWorkers,
-   'bytes_read' => 0,
-   'elapsed' => 0.0,
-   'latency_sum' => 0.0,
-   'latency_count' => 0,
-];
-$integerFields = [
-   'scheduled', 'sent', 'responses', 'informational', 'outstanding',
-   'partial_writes', 'bytes_read', 'latency_count',
-   'connection_failures',
-];
-
+// @ Import only exact files assigned to successful child PIDs, then merge the
+//   underlying distributions and aligned buckets rather than child percentiles.
+$MergedTelemetry = null;
 foreach ($childPIDs as $PID) {
-   $file = $childFiles[$PID];
-   $contents = @\file_get_contents($file);
+   $contents = @\file_get_contents($childFiles[$PID]);
    $data = $contents === false ? null : \json_decode($contents, true);
-   $childElapsed = $data['elapsed'] ?? null;
-   $childLatency = $data['latency_sum'] ?? null;
-   $valid = ($childStatuses[$PID] ?? false)
-      && \is_array($data)
-      && \is_bool($data['accounting'] ?? null)
-      && \is_array($data['statuses'] ?? null)
-      && \is_array($data['failures'] ?? null)
-      && \is_array($data['write_failures'] ?? null)
-      && (\is_int($childElapsed) || \is_float($childElapsed))
-      && (\is_int($childLatency) || \is_float($childLatency))
-      && \is_finite((float) $childElapsed)
-      && (float) $childElapsed > 0
-      && \is_finite((float) $childLatency)
-      && (float) $childLatency >= 0;
+   $Telemetry = ($childStatuses[$PID] ?? false)
+      ? WorkerTelemetry::import($data, (float) $duration)
+      : null;
 
-   foreach ($integerFields as $field) {
-      $valid = $valid && \is_int($data[$field] ?? null) && $data[$field] >= 0;
+   if ($Telemetry === null || $Telemetry->accounting === false) {
+      $forkFailed = true;
+      continue;
    }
 
-   if ($valid) {
-      foreach (['statuses', 'failures', 'write_failures'] as $map) {
-         foreach ($data[$map] as $key => $count) {
-            $valid = $valid && \is_int($count) && $count >= 0;
-            if ($map === 'statuses') {
-               $valid = $valid && \is_int($key) && $key >= 100 && $key <= 599;
-            }
-         }
-      }
+   if ($MergedTelemetry === null) {
+      $MergedTelemetry = $Telemetry;
+      continue;
    }
 
-   $valid = $valid
-      && $data['accounting'] === true
-      && $data['connection_failures'] === 0
-      && $data['outstanding'] === 0
-      && $data['scheduled'] === $data['sent'] + \array_sum($data['write_failures'])
-      && $data['sent'] === $data['responses'] + \array_sum($data['failures'])
-      && $data['responses'] === \array_sum($data['statuses']);
-
-   if ($valid) {
-      foreach ($integerFields as $field) {
-         if ($field !== 'bytes_read' && $field !== 'latency_count') {
-            $stats[$field] += $data[$field];
-         }
-      }
-      $stats['bytes_read'] += $data['bytes_read'];
-      $stats['latency_count'] += $data['latency_count'];
-      $stats['elapsed'] = max($stats['elapsed'], (float) $data['elapsed']);
-      $stats['latency_sum'] += (float) $data['latency_sum'];
-
-      foreach (['statuses', 'failures', 'write_failures'] as $map) {
-         foreach ($data[$map] as $key => $count) {
-            $stats[$map][$key] = ($stats[$map][$key] ?? 0) + $count;
-         }
-      }
+   try {
+      $MergedTelemetry->merge($Telemetry);
    }
-
-   $stats['accounting'] = $stats['accounting'] && $valid;
+   catch (\Throwable $Throwable) {
+      $forkFailed = true;
+      \fwrite(\STDERR, 'ERROR: ' . $Throwable->getMessage() . "\n");
+   }
 }
 
-\ksort($stats['statuses']);
-\ksort($stats['failures']);
-\ksort($stats['write_failures']);
-$stats['accounting'] = $stats['accounting']
-   && $stats['connection_failures'] === 0
-   && $stats['outstanding'] === 0
-   && $stats['scheduled'] === $stats['sent'] + \array_sum($stats['write_failures'])
-   && $stats['sent'] === $stats['responses'] + \array_sum($stats['failures'])
-   && $stats['responses'] === \array_sum($stats['statuses']);
+if (
+   $forkFailed
+   || \count($childPIDs) !== $requestedWorkers
+   || $MergedTelemetry === null
+   || $MergedTelemetry->accounting === false
+) {
+   \fwrite(\STDERR, "ERROR: one or more benchmark workers produced invalid telemetry.\n");
+   $Artifacts->clean();
+   exit(1);
+}
 
-outputResults($stats);
+echo $MergedTelemetry->render();
 $Artifacts->clean();
 exit(0);

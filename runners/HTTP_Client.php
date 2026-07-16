@@ -19,12 +19,14 @@ use Bootgly\Benchmarks\Runners\RunProcess;
 use Bootgly\Benchmarks\Runners\ServerReadiness;
 use Bootgly\Benchmarks\Runners\WorkerGeneration;
 use Bootgly\Benchmarks\Runners\WorkerGenerationFailure;
+use Bootgly\Benchmarks\Runners\WorkerResult;
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
 use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 
 require_once __DIR__ . '/RunArtifacts.php';
 require_once __DIR__ . '/ServerReadiness.php';
 require_once __DIR__ . '/WorkerGeneration.php';
+require_once __DIR__ . '/WorkerResult.php';
 require_once __DIR__ . '/WorkerWarmup.php';
 
 
@@ -838,16 +840,6 @@ return new class (
    }
    private function parse (string $output): Result
    {
-      /** @var array{rps?: float, latency?: string|null, transfer?: string|null}|null $data */
-      $data = json_decode($output, true);
-      if (!\is_array($data)) {
-         return new Result();
-      }
-
-      return new Result(
-         rps: isset($data['rps']) ? (float) $data['rps'] : null,
-         latency: isset($data['latency']) ? (string) $data['latency'] : null,
-         transfer: isset($data['transfer']) ? (string) $data['transfer'] : null,
-      );
+      return WorkerResult::parse($output);
    }
 };

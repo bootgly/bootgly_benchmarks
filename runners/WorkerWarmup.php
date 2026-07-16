@@ -12,6 +12,9 @@
 namespace Bootgly\Benchmarks\Runners;
 
 
+require_once __DIR__ . '/WorkerResult.php';
+
+
 final class WorkerWarmupFailure extends \RuntimeException
 {
    /**
@@ -102,13 +105,17 @@ final class WorkerWarmupFailure extends \RuntimeException
  *    informational:int,
  *    outstanding:int,
  *    failed:int,
+ *    censored:int,
  *    write_failed:int,
+ *    write_censored:int,
  *    connection_failed:int,
  *    partial_writes:int,
  *    accounting:true,
  *    statuses:array<int,int>,
  *    failures:array<string,int>,
- *    write_failures:array<string,int>
+ *    censors:array<string,int>,
+ *    write_failures:array<string,int>,
+ *    write_censors:array<string,int>
  * }
  */
 final class WorkerWarmup
@@ -667,9 +674,18 @@ final class WorkerWarmup
          throw new \InvalidArgumentException('Expected sustained warmup duration must be positive.');
       }
 
+      $Result = WorkerResult::parse($JSON);
+      if ($Result->accounting !== true) {
+         throw new WorkerWarmupFailure(
+            'Sustained warmup telemetry failed the strict worker-result contract.',
+            $coverage,
+         );
+      }
+
       $counters = [
          'scheduled', 'sent', 'responses', 'informational', 'outstanding',
-         'failed', 'write_failed', 'connection_failed', 'partial_writes',
+         'failed', 'censored', 'write_failed', 'write_censored',
+         'connection_failed', 'partial_writes',
       ];
       foreach ($counters as $counter) {
          if (!\is_int($data[$counter] ?? null) || $data[$counter] < 0) {
@@ -710,7 +726,9 @@ final class WorkerWarmup
 
       $statuses = $this->normalize($data, 'statuses', $coverage, true);
       $failures = $this->normalize($data, 'failures', $coverage);
+      $censors = $this->normalize($data, 'censors', $coverage);
       $writeFailures = $this->normalize($data, 'write_failures', $coverage);
+      $writeCensors = $this->normalize($data, 'write_censors', $coverage);
 
       $allowed = [];
       $declared = $coverage['declared_status'] ?? null;
@@ -730,9 +748,17 @@ final class WorkerWarmup
             throw new WorkerWarmupFailure('Sustained warmup observed an undeclared HTTP status.', $coverage);
          }
       }
-      foreach ($failures as $reason => $count) {
+      if ($failures !== []) {
+         throw new WorkerWarmupFailure('Sustained warmup observed a request failure.', $coverage);
+      }
+      foreach ($censors as $reason => $count) {
          if ($reason !== 'measurement_ended') {
-            throw new WorkerWarmupFailure('Sustained warmup observed a non-terminal request failure.', $coverage);
+            throw new WorkerWarmupFailure('Sustained warmup observed an unknown request censor.', $coverage);
+         }
+      }
+      foreach ($writeCensors as $reason => $count) {
+         if ($reason !== 'measurement_ended') {
+            throw new WorkerWarmupFailure('Sustained warmup observed an unknown write censor.', $coverage);
          }
       }
 
@@ -742,11 +768,13 @@ final class WorkerWarmup
          && $data['write_failed'] === 0
          && $data['outstanding'] === 0
          && $writeFailures === []
-         && $data['scheduled'] === $data['sent'] + $data['write_failed']
-         && $data['sent'] === $data['responses'] + $data['failed']
+         && $data['scheduled'] === $data['sent'] + $data['write_failed'] + $data['write_censored']
+         && $data['sent'] === $data['responses'] + $data['failed'] + $data['censored']
          && $data['failed'] === \array_sum($failures)
+         && $data['censored'] === \array_sum($censors)
          // @phpstan-ignore identical.alwaysTrue
          && $data['write_failed'] === \array_sum($writeFailures)
+         && $data['write_censored'] === \array_sum($writeCensors)
          && $data['responses'] === \array_sum($statuses);
 
       if (!$accounting) {
@@ -764,13 +792,17 @@ final class WorkerWarmup
          'informational' => $data['informational'],
          'outstanding' => $data['outstanding'],
          'failed' => $data['failed'],
+         'censored' => $data['censored'],
          'write_failed' => $data['write_failed'],
+         'write_censored' => $data['write_censored'],
          'connection_failed' => $data['connection_failed'],
          'partial_writes' => $data['partial_writes'],
          'accounting' => true,
          'statuses' => $statuses,
          'failures' => $failures,
+         'censors' => $censors,
          'write_failures' => $writeFailures,
+         'write_censors' => $writeCensors,
       ];
    }
 
@@ -893,13 +925,17 @@ final class WorkerWarmup
             'informational' => $traffic['informational'],
             'outstanding' => $traffic['outstanding'],
             'failed' => $traffic['failed'],
+            'censored' => $traffic['censored'],
             'write_failed' => $traffic['write_failed'],
+            'write_censored' => $traffic['write_censored'],
             'connection_failed' => $traffic['connection_failed'],
             'partial_writes' => $traffic['partial_writes'],
             'accounting' => true,
             'statuses' => $traffic['statuses'],
             'failures' => $traffic['failures'],
+            'censors' => $traffic['censors'],
             'write_failures' => $traffic['write_failures'],
+            'write_censors' => $traffic['write_censors'],
          ],
       ];
    }

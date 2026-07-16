@@ -390,8 +390,8 @@ totals, and `accounting`. A valid terminal result must satisfy all of these
 conditions:
 
 ```text
-scheduled = sent + sum(write_failures)
-sent = responses + sum(failures)
+scheduled = sent + sum(write_failures) + sum(write_censors)
+sent = responses + sum(failures) + sum(censors)
 outstanding = 0
 responses = sum(statuses)
 connection_failed = 0
@@ -403,13 +403,25 @@ non-finite, nonzero-exit, or internally inconsistent child output makes the
 result `accounting=invalid`; throughput is then emitted as `null`/`N/A` rather
 than inferred from partial data. `measurement_ended` is the explicit terminal
 classification for fully sent requests still in flight when the duration timer
-closes the window; it is not by itself evidence of a server fault.
+closes the window. It is reported under `censors`, not `failures`, and is not by
+itself evidence of a server fault. Queued request bytes not fully accepted by
+the cutoff are reported separately under `write_censors`.
 
 `partial_writes` counts observed reconciliations that leave a queued suffix; it
-is not a count of every underlying `fwrite()` syscall. The current latency value
-is still the older per-socket/burst approximation. It must not be interpreted as
-per-logical-request latency under pipelining; monotonic request timestamps and
-mergeable percentiles remain separate harness work.
+is not a count of every underlying `fwrite()` syscall. The `tcp_client` and
+`http_client` runners timestamp every fully accepted logical request and every
+framing-complete final response with the monotonic clock. Pipeline requests are
+correlated through their logical send-time FIFO: responses delivered by one
+socket read may share an arrival timestamp, but each is matched to its own send
+timestamp rather than multiplying one chunk RTT.
+
+Every valid result includes an exact average plus p50, p95, p99, p99.9, and max
+derived from a mergeable HDR-style nanosecond histogram. Child histograms are
+merged as distributions; child percentiles are never averaged. Aligned raw
+one-second counters retain sent, responses, failures, censors, write failures,
+write censors, and bytes read. The scalar latency summary is present in marks
+and JSON; the complete histogram and series are preserved in the per-result
+telemetry JSON artifact identified by the marks line and the run artifact list.
 
 ---
 
@@ -623,6 +635,7 @@ bootgly/storage/tests/benchmarks/<case>/runs/<run-id>/
 ├── manifest.json
 ├── result.json                 # --format=json
 ├── marks/
+├── telemetry/                 # raw per-result histogram + one-second series
 ├── reports/                    # --results=report|charts
 ├── logs/                       # supervised harness channels
 └── runners/                    # when the runner starts child processes
@@ -858,7 +871,9 @@ baseline:
 ```
 
 - **vs Bootgly** = `((Bootgly − Opponent) / Opponent) × 100` — a negative value means the opponent is slower than Bootgly.
-- **Latency** = average response time.
+- **Latency** = exact arithmetic mean of the correlated logical-request
+  distribution. The following percentile line/table reports p50, p95, p99,
+  p99.9, and max from that same distribution.
 
 ### Saved marks
 

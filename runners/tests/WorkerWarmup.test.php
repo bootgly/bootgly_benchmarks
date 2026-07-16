@@ -3,6 +3,8 @@
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
 use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 use Bootgly\ACI\Tests\Benchmark\Configs;
+use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
+use Bootgly\ACI\Tests\Benchmark\Time\Series;
 use Bootgly\ACI\Tests\Suite\Test\Specification;
 
 require_once dirname(__DIR__) . '/WorkerWarmup.php';
@@ -767,26 +769,49 @@ $Check(
 );
 $Check($elapsed < 0.6, 'Socket I/O exceeded the monotonic warmup budget.');
 
-// @ Sustained traffic is admitted only with a strict JSON document, closed
-//   ledgers, declared/probed statuses, and terminal-only request failures.
+// @ Sustained traffic is admitted only with a strict v2 telemetry document,
+//   closed ledgers, declared/probed statuses, and deadline censoring separated
+//   from real request/write failures.
+$Histogram = new Histogram;
+for ($i = 0; $i < 10; $i++) {
+   $Histogram->record(1_000_000);
+}
+$latencySummary = $Histogram->inspect();
+$latencySummary['average_ns'] = 1_000_000.0;
+$Series = new Series(1_000_000_000, 2_000_000_000);
+$Series->record(1_500_000_000, [
+   'sent' => 11,
+   'responses' => 10,
+   'censored' => 1,
+   'bytes_read' => 1_280,
+]);
 $data = [
-   'rps' => 8.0,
-   'elapsed' => 1.25,
+   'schema' => 'bootgly.benchmark-result.v2',
+   'rps' => 10.0,
+   'elapsed' => 1.0,
    'latency' => '1.00ms',
-   'transfer' => '1.00KB/s',
+   'transfer' => '1.25KB/s',
    'scheduled' => 11,
    'sent' => 11,
    'responses' => 10,
    'informational' => 0,
    'outstanding' => 0,
-   'failed' => 1,
+   'failed' => 0,
+   'censored' => 1,
    'write_failed' => 0,
+   'write_censored' => 0,
    'connection_failed' => 0,
    'partial_writes' => 0,
+   'start_lag_ns' => 0,
    'accounting' => true,
    'statuses' => ['200' => 10],
-   'failures' => ['measurement_ended' => 1],
+   'failures' => [],
+   'censors' => ['measurement_ended' => 1],
    'write_failures' => [],
+   'write_censors' => [],
+   'latency_summary' => $latencySummary,
+   'latency_histogram' => $Histogram->export(),
+   'time_series' => $Series->export(),
 ];
 $JSON = json_encode($data, JSON_THROW_ON_ERROR);
 $traffic = $Warmup->validate($JSON, $coverage, 1);
@@ -830,9 +855,16 @@ $Reject(
 
 $invalid = $data;
 $invalid['failures'] = ['protocol_error' => 1];
+$invalid['failed'] = 1;
+$invalid['censors'] = [];
+$invalid['censored'] = 0;
+$invalid['time_series']['buckets'][0]['failed'] = 1;
+$invalid['time_series']['buckets'][0]['censored'] = 0;
+$invalid['time_series']['totals']['failed'] = 1;
+$invalid['time_series']['totals']['censored'] = 0;
 $Reject(
    static fn (): array => $Warmup->validate(json_encode($invalid, JSON_THROW_ON_ERROR), $coverage, 1),
-   'A non-terminal sustained-warmup failure was accepted.',
+   'A sustained-warmup request failure was accepted.',
 );
 
 $Reject(

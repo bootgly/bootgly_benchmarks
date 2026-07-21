@@ -287,6 +287,13 @@ function runWorker (
               &$Trackers, &$Connections,
               $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
       {
+         // ! Hot-loop hoists: the reactor stamps each select() wakeup once
+         //   ($Event->wakeNS) and the single-path replenish never needs the
+         //   modulo + per-response array lookups.
+         $Event = TCP_Client_CLI::$Event;
+         $singleRequest = $requests[0] ?? '';
+         $singleLength = $requestLengths[0] ?? 0;
+
          TCP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
             use ($method, $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
                  $Histogram, &$requestIndex, &$Trackers, &$Connections)
@@ -385,11 +392,16 @@ function runWorker (
          };
 
          TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
-            use ($requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
+            use ($Event, $singleRequest, $singleLength,
+                 $requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
                  &$deadlineNS, &$Trackers,
                  $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
          {
-            $nowNS = (int) \hrtime(true);
+            // ?! Receive instant = the select() wakeup stamp: every response
+            //    handled here was kernel-buffered before the wakeup, so one
+            //    clock read per wakeup is both cheaper and skew-free across
+            //    the sockets dispatched in it.
+            $nowNS = $Event->wakeNS;
             if ($nowNS >= $deadlineNS) {
                return;
             }
@@ -433,9 +445,17 @@ function runWorker (
             //   dominant throughput case: keep it scalar instead of allocating
             //   a burst string and request-boundary array on every response.
             if ($count === 1) {
-               $index = $requestIndex % $pathCount;
-               $burst = $requests[$index];
-               $length = $requestLengths[$index];
+               // ? Single-endpoint runs replenish a constant request — skip
+               //   the modulo and the two per-response array lookups.
+               if ($pathCount === 1) {
+                  $burst = $singleRequest;
+                  $length = $singleLength;
+               }
+               else {
+                  $index = $requestIndex % $pathCount;
+                  $burst = $requests[$index];
+                  $length = $requestLengths[$index];
+               }
                $requestIndex++;
             }
             else {

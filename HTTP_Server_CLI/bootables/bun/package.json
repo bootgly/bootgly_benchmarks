@@ -1,0 +1,10 @@
+{
+  "name": "bootgly-benchmarks-bun-opponent",
+  "private": true,
+  "type": "module",
+  "description": "Bootgly Benchmarks — HTTP_Server_CLI — Bun (Bun.serve) TechEmpower bootable",
+  "license": "MIT",
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
+}

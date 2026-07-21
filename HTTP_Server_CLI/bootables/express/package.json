@@ -1,0 +1,15 @@
+{
+  "name": "bootgly-benchmarks-express-opponent",
+  "private": true,
+  "type": "module",
+  "description": "Bootgly Benchmarks — HTTP_Server_CLI — Express (Node.js) TechEmpower bootable",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "koffi": "^2.9.0",
+    "pg": "^8.22.0"
+  }
+}

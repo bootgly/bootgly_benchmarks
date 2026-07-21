@@ -8,9 +8,21 @@
 namespace Bootgly\Benchmarks\HTTP_Server_CLI;
 
 
+use const FILTER_VALIDATE_INT;
+use function array_intersect;
+use function array_map;
+use function filter_var;
+use function getenv;
+use function implode;
+use function in_array;
+use function preg_match;
+use function putenv;
+use function range;
+use function var_export;
+use InvalidArgumentException;
+
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Opponent;
-use InvalidArgumentException;
 
 
 final class DatabaseParity
@@ -123,6 +135,8 @@ final class DatabaseParity
          'roadrunner'      => 'fixed-one',
          'frankenphp'      => 'fixed-one',
          'laravel-octane'  => 'fixed-one',
+         'express'         => 'fixed-one',
+         'bun'             => 'fixed-one',
       ];
       $selected = $Configs->opponents === null
          ? null

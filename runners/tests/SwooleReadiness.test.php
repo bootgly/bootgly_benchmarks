@@ -5,9 +5,9 @@ use Bootgly\Benchmarks\Runners\RunArtifacts;
 
 
 $framework = dirname(__DIR__, 3) . '/bootgly/Bootgly';
-require_once "{$framework}/ABI/Data/__String/Escapeable.php";
-require_once "{$framework}/ABI/Data/__String/Escapeable/Text.php";
-require_once "{$framework}/ABI/Data/__String/Escapeable/Text/Formattable.php";
+require_once "{$framework}/ABI/Code/__String/Escapeable.php";
+require_once "{$framework}/ABI/Code/__String/Escapeable/Text.php";
+require_once "{$framework}/ABI/Code/__String/Escapeable/Text/Formattable.php";
 require_once "{$framework}/ACI/Tests/Benchmark/Configs.php";
 require_once "{$framework}/ACI/Tests/Benchmark/Opponent.php";
 require_once "{$framework}/ACI/Tests/Benchmark/Runner.php";

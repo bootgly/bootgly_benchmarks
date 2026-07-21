@@ -7,7 +7,7 @@
  * --------------------------------------------------------------------------
  */
 
-use Bootgly\ABI\Data\__String\Escapeable\Text\Formattable;
+use Bootgly\ABI\Code\__String\Escapeable\Text\Formattable;
 use Bootgly\ACI\Tests\Benchmark\Opponent;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Result;

@@ -458,8 +458,27 @@ def _fmt_x(v) -> str:
     return str(v)
 
 
+def _sweep_token(x_values) -> str:
+    """Render swept values in the benchmark CLI sweep syntax.
+
+    A contiguous ascending integer run becomes a `first..last` range; anything
+    else falls back to the comma-list form — both are expanded natively by the
+    `--server-workers`-style vary parameters.
+    """
+    rendered = [_fmt_x(v) for v in x_values]
+    try:
+        ints = [int(v) for v in rendered]
+    except ValueError:
+        return ",".join(rendered)
+
+    if len(ints) > 2 and ints == list(range(ints[0], ints[-1] + 1)):
+        return f"{ints[0]}..{ints[-1]}"
+
+    return ",".join(rendered)
+
+
 def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared: dict[str, str], opponents: list[str], loads: list[str]) -> str:
-    """Best-effort `for`-loop reproducing the sweep."""
+    """Single-invocation reproduction command using the in-process sweep syntax."""
     flag_lines: list[str] = []
     if "runner" in shared:
         flag_lines.append(f"--runner={shared['runner']}")
@@ -472,28 +491,18 @@ def _reproduction_command(case: str, load_set: str, x_key: str, x_values, shared
     if "pipeline" in shared and shared["pipeline"] != "1":
         flag_lines.append(f"--pipeline={shared['pipeline']}")
 
-    # # X-axis variable.
-    if x_key == "server-workers":
-        loop_var = "sw"
-    elif x_key == "client-workers":
-        loop_var = "cw"
-    else:
-        loop_var = "x"
-    flag_lines.append(f'--{x_key}="${loop_var}"')
+    # # X-axis sweep — expanded in-process by the vary parameter itself.
+    flag_lines.append(f"--{x_key}={_sweep_token(x_values)}")
 
     opponents_csv = ",".join(_opponent_slug(c) for c in opponents)
-    x_range = " ".join(_fmt_x(v) for v in x_values)
 
-    lines = ["```bash", f"for {loop_var} in {x_range}; do"]
-
-    lines.append(f"   php bootgly test benchmark {case} \\")
-    lines.append(f"      --opponents={opponents_csv} \\")
+    lines = ["```bash", f"php bootgly test benchmark {case} \\"]
+    lines.append(f"   --opponents={opponents_csv} \\")
     for fl in flag_lines[:-1]:
-        lines.append(f"      {fl} \\")
-    lines.append(f"      {flag_lines[-1]} \\")
+        lines.append(f"   {fl} \\")
+    lines.append(f"   {flag_lines[-1]} \\")
     loads_arg = f"{load_set}:<IDS>" if load_set and load_set != "default" else "<IDS>"
-    lines.append(f"      --loads={loads_arg}  # loads in this sweep: {', '.join(loads)}")
-    lines.append("done")
+    lines.append(f"   --loads={loads_arg}  # loads in this sweep: {', '.join(loads)}")
     lines.append("```")
 
     return "\n".join(lines)
@@ -767,6 +776,7 @@ def main() -> int:
     ap.add_argument("--baseline", default=None, help="Baseline opponent for ratio chart and Δ column (default: first alphabetical).")
     ap.add_argument("--x-key", dest="x_key", default=None, help="Force X axis to this config key.")
     ap.add_argument("--load-set", dest="load_set", default=None, help="Override load-set token used in output filenames (default: from marks Config or 'default').")
+    ap.add_argument("--exclude-loads", dest="exclude_loads", default=None, help="Comma-separated load labels to drop from the report and charts (e.g. 'Cached queries').")
     ap.add_argument("--title", default=None, help="Optional report title (defaults to case + sweep summary).")
     ap.add_argument("--yscale", default="linear", choices=["linear", "log"], help="Throughput Y axis scale (default: linear). Use 'log' when opponents differ by orders of magnitude.")
 
@@ -811,6 +821,18 @@ def main() -> int:
                 opponents.append(c)
             if s not in loads:
                 loads.append(s)
+
+    # # Optional load exclusion — every downstream artifact (charts, tables,
+    #   peaks, reproduction command) derives from `loads`, so one filter here
+    #   removes the label everywhere.
+    if args.exclude_loads:
+        excluded = {s.strip() for s in args.exclude_loads.split(",") if s.strip()}
+        dropped = [s for s in loads if s in excluded]
+        loads = [s for s in loads if s not in excluded]
+        if not loads:
+            raise SystemExit("--exclude-loads removed every load; nothing to chart.")
+        if dropped:
+            print(f"Excluded loads: {', '.join(dropped)}")
 
     data: dict[str, dict[str, list[int | None]]] = {
         s: {c: [] for c in opponents} for s in loads

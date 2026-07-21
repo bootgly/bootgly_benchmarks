@@ -5,8 +5,9 @@
 # One image that runs the WHOLE benchmark in a single `docker run` — Bootgly
 # plus one opponent, all in-process on loopback, no host setup. Competitor
 # runtimes (Swoole, Workerman, RoadRunner, FrankenPHP, Hyperf, ReactPHP, AMPHP,
-# Laravel Octane and PostgreSQL) live ONLY in this image — never in bootgly:slim / bootgly:full,
-# which stay dependency-free. Opt in per opponent with build ARGs.
+# Laravel Octane, Express/Node.js, Bun and PostgreSQL) live ONLY in this image —
+# never in bootgly:slim / bootgly:full, which stay dependency-free. Opt in per
+# opponent with build ARGs.
 #
 # The opponent scripts launch their server natively (no docker-in-docker) —
 # each guards on its own runtime capability (extension / vendor / binary), all
@@ -39,6 +40,8 @@ ARG WITH_HYPERF=0
 ARG WITH_REACTPHP=0
 ARG WITH_AMPHP=0
 ARG WITH_LARAVEL_OCTANE=0
+ARG WITH_EXPRESS=0
+ARG WITH_BUN=0
 
 # ! Composer (build-time) for opponents that vendor PHP packages
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -131,6 +134,33 @@ RUN if [ "$WITH_LARAVEL_OCTANE" = "1" ]; then set -eux; \
         echo "composer retry $i"; sleep 5; \
       done; \
       mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs run; \
+    fi
+
+# ! Express — Node.js 22 (NodeSource) + the bootable's npm vendor (express, pg,
+#   koffi — koffi ships prebuilt FFI binaries, no node-gyp toolchain needed).
+#   The worker evidence lease uses flock(2) through koffi at run time.
+RUN if [ "$WITH_EXPRESS" = "1" ]; then set -eux; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; \
+      apt-get install -y --no-install-recommends nodejs; \
+      rm -rf /var/lib/apt/lists/*; \
+      cd "$BOOTABLES/express"; npm ci --omit=dev --no-audit --no-fund; \
+    fi
+
+# ! Bun — pinned linux/amd64 release binary (same verify-before-install policy
+#   as FrankenPHP: a mutable or corrupted download must not enter a benchmark
+#   image unnoticed) + the bootable's vendor (pg only; flock(2) comes from
+#   bun:ffi, zero dependencies).
+RUN if [ "$WITH_BUN" = "1" ]; then set -eux; \
+      apt-get update; apt-get install -y --no-install-recommends unzip; rm -rf /var/lib/apt/lists/*; \
+      curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.1.43/bun-linux-x64.zip \
+        -o /tmp/bun.zip; \
+      echo '8f98aa87091557647dc23c65c3206b14ee902c8e27d0203daa1200b2d1fa3c21  /tmp/bun.zip' \
+        | sha256sum -c -; \
+      unzip -j /tmp/bun.zip bun-linux-x64/bun -d /usr/local/bin; \
+      chmod +x /usr/local/bin/bun; rm /tmp/bun.zip; \
+      cd "$BOOTABLES/bun"; bun install --frozen-lockfile --production; \
     fi
 
 # # Entrypoint

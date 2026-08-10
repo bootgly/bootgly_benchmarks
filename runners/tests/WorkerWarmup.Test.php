@@ -5,12 +5,12 @@ use Bootgly\Benchmarks\Runners\WorkerWarmupFailure;
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
 use Bootgly\ACI\Tests\Benchmark\Time\Series;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 
 require_once dirname(__DIR__) . '/WorkerWarmup.php';
 
 
-return new Specification(
+return new Test(
    description: 'It should prove, validate and seal the complete worker-aware warmup protocol',
    test: static function (): bool
    {
@@ -321,8 +321,45 @@ $Check(
    'An explicit matrix attempt cap incorrectly weakened the independent seal cap.',
 );
 
-// @ Both concrete clients expose the same budget control through configuration,
+// @ TCP_Client resolves its fixed default consistently across configuration,
 //   metadata, help and the clear Client banner subgroup.
+$DefaultTCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
+$DefaultTCPRunner->configure([]);
+$DefaultTCPOptions = $DefaultTCPRunner->options();
+$DefaultTCPBanner = $DefaultTCPRunner->banner(Configs::parse([]));
+$Check(
+   ($DefaultTCPRunner->meta['client-workers'] ?? null) === 12
+      && ($DefaultTCPOptions['--client-workers=N'] ?? null) === 'Number of client workers (default: 12)'
+      && ($DefaultTCPOptions['--client-worker=N'] ?? null) === 'Alias of --client-workers'
+      && ($DefaultTCPBanner['Client']['Client workers'] ?? null) === '12',
+   'TCP client did not resolve its fixed 12-worker default consistently.',
+);
+
+$SingularTCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
+$SingularTCPRunner->configure(['client-worker' => 2]);
+$Check(
+   ($SingularTCPRunner->meta['client-workers'] ?? null) === 2,
+   'TCP client did not honor the singular --client-worker compatibility alias.',
+);
+
+$conflictingWorkerAliasesRejected = false;
+try {
+   $ConflictingTCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
+   $ConflictingTCPRunner->configure([
+      'client-worker' => 2,
+      'client-workers' => 3,
+   ]);
+}
+catch (InvalidArgumentException) {
+   $conflictingWorkerAliasesRejected = true;
+}
+$Check(
+   $conflictingWorkerAliasesRejected,
+   'TCP client accepted conflicting singular and plural worker options.',
+);
+
+// @ Both concrete clients preserve explicit overrides and expose the same
+//   worker-proof budget control.
 $TCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
 $TCPRunner->configure(['client-workers' => 1, 'worker-proof-budget' => '300']);
 $TCPOptions = $TCPRunner->options();
@@ -330,9 +367,11 @@ $TCPBanner = $TCPRunner->banner(Configs::parse([]));
 $Check(
    isset($TCPOptions['--worker-proof-budget=auto|SECONDS'])
       && ($TCPRunner->meta['worker-proof-budget'] ?? null) === '300'
+      && ($TCPRunner->meta['client-workers'] ?? null) === 1
+      && ($TCPBanner['Client']['Client workers'] ?? null) === '1'
       && ($TCPBanner['Client']['Warmup traffic'] ?? null) === '5 s · selected load'
       && ($TCPBanner['Client']['Proof budget'] ?? null) === '300 s · explicit',
-   'TCP client did not expose the worker proof budget consistently.',
+   'TCP client did not preserve its explicit worker override or expose the proof budget consistently.',
 );
 
 $HTTPRunner = include dirname(__DIR__) . '/HTTP_Client.php';

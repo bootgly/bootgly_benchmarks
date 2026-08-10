@@ -2,13 +2,13 @@
 
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Opponent;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\HTTP_Server_CLI\DatabaseParity;
 
 
 require_once dirname(__DIR__, 2) . '/HTTP_Server_CLI/DatabaseParity.php';
 
-return new Specification(
+return new Test(
    description: 'It should enforce the HTTP server database comparability contract',
    test: static function (): bool
    {

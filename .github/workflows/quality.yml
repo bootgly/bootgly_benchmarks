@@ -97,13 +97,13 @@ jobs:
           set -euo pipefail
 
           REQUIRED_SIBLING_TESTS=(
-            '../bootgly_benchmarks/runners/tests/WorkerWarmup.test.php'
-            '../bootgly_benchmarks/runners/tests/WorkerEvidence.test.php'
-            '../bootgly_benchmarks/runners/tests/WorkerGeneration.test.php'
-            '../bootgly_benchmarks/runners/tests/WorkerGenerationRunnerFault.test.php'
-            '../bootgly_benchmarks/runners/tests/WorkerSweep.test.php'
-            '../bootgly_benchmarks/runners/tests/AMPHPStop.test.php'
-            '../bootgly_benchmarks/runners/tests/HTTPServerDatabaseParity.test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerWarmup.Test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerEvidence.Test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerGeneration.Test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerGenerationRunnerFault.Test.php'
+            '../bootgly_benchmarks/runners/tests/WorkerSweep.Test.php'
+            '../bootgly_benchmarks/runners/tests/AMPHPStop.Test.php'
+            '../bootgly_benchmarks/runners/tests/HTTPServerDatabaseParity.Test.php'
             '../bootgly_benchmarks/runners/WorkerSweep.php'
           )
           for TEST_FILE in "${REQUIRED_SIBLING_TESTS[@]}"; do

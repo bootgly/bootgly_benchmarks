@@ -2,7 +2,7 @@
 
 use Bootgly\ACI\Tests\Benchmark\Configs;
 use Bootgly\ACI\Tests\Benchmark\Opponent;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\Runners\WorkerSweep;
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
 
@@ -10,7 +10,7 @@ use Bootgly\Benchmarks\Runners\WorkerWarmup;
 require_once dirname(__DIR__) . '/WorkerWarmup.php';
 require_once dirname(__DIR__) . '/WorkerSweep.php';
 
-return new Specification(
+return new Test(
    description: 'It should reject an unschedulable late worker-proof sweep before round one',
    test: static function (): bool
    {

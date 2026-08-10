@@ -2,14 +2,14 @@
 
 use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
 use Bootgly\ACI\Tests\Benchmark\Time\Series;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\Runners\MeasurementBarrier;
 use Bootgly\Benchmarks\Runners\WorkerResult;
 
 
 require_once dirname(__DIR__) . '/WorkerResult.php';
 
-return new Specification(
+return new Test(
    description: 'It should revalidate complete latency and time-series worker telemetry',
    test: static function (): bool
    {

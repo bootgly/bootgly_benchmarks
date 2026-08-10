@@ -7,7 +7,7 @@ use Bootgly\ACI\Tests\Benchmark\Result;
 use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\Benchmarks\Runners\WorkerWarmup;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 
 
 require_once dirname(__DIR__) . '/RunArtifacts.php';
@@ -15,7 +15,7 @@ require_once dirname(__DIR__) . '/WorkerWarmup.php';
 require_once dirname(__DIR__, 2) . '/HTTP_Server_CLI/bootables/WorkerEvidence.php';
 
 
-return new Specification(
+return new Test(
    description: 'It should reject both client runners when the worker generation changes during measurement',
    test: static function (): bool
    {

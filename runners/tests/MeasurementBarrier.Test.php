@@ -1,12 +1,12 @@
 <?php
 
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\Runners\MeasurementBarrier;
 
 
 require_once dirname(__DIR__) . '/MeasurementBarrier.php';
 
-return new Specification(
+return new Test(
    description: 'It should align every load child on one monotonic measurement window',
    test: static function (): bool
    {

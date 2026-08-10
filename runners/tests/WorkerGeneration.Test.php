@@ -2,12 +2,12 @@
 
 use Bootgly\Benchmarks\Runners\WorkerGeneration;
 use Bootgly\Benchmarks\Runners\WorkerGenerationFailure;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 
 require_once dirname(__DIR__) . '/WorkerGeneration.php';
 
 
-return new Specification(
+return new Test(
    description: 'It should prove the measured worker generation remains stable and fail closed on changes',
    test: static function (): bool
    {

@@ -2,7 +2,7 @@
 
 use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
 use Bootgly\ACI\Tests\Benchmark\Time\Series;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\Runners\WorkerResult;
 use Bootgly\Benchmarks\Runners\WorkerTelemetry;
 
@@ -10,7 +10,7 @@ use Bootgly\Benchmarks\Runners\WorkerTelemetry;
 require_once dirname(__DIR__) . '/WorkerResult.php';
 require_once dirname(__DIR__) . '/WorkerTelemetry.php';
 
-return new Specification(
+return new Test(
    description: 'It should strictly import and atomically merge worker telemetry',
    test: static function (): bool
    {

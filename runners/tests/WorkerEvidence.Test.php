@@ -1,12 +1,12 @@
 <?php
 
 use Bootgly\Benchmarks\HTTP_Server_CLI\WorkerEvidence;
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 
 require_once dirname(__DIR__, 2) . '/HTTP_Server_CLI/bootables/WorkerEvidence.php';
 
 
-return new Specification(
+return new Test(
    description: 'It should prove the generic worker evidence lifecycle and lease protocol',
    test: static function (): bool
    {

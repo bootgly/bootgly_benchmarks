@@ -1,12 +1,12 @@
 <?php
 
-use Bootgly\ACI\Tests\Suite\Test\Specification;
+use Bootgly\ACI\Tests\Suite\Test;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 
 require_once dirname(__DIR__) . '/RunArtifacts.php';
 
 
-return new Specification(
+return new Test(
    description: 'It should stop only the PID-owned AMPHP worker tree without leaking process groups',
    test: static function (): bool
    {

@@ -112,8 +112,8 @@ return new class (
          throw new InvalidArgumentException('--warmup must be a positive number of seconds.');
       }
 
-      // ! Materialise the auto client-worker count so $this->meta captures the
-      //   resolved value (nproc / 2) instead of the `0` auto sentinel.
+      // ! Materialise the default client-worker count so $this->meta captures
+      //   the resolved value instead of the `0` unset sentinel.
       $this->workers = $this->resolveClientWorkers();
 
       // @ Surface active runner config for the `.marks` Config header.
@@ -129,7 +129,7 @@ return new class (
    public function options (): array
    {
       return [
-         '--client-workers=N' => 'Number of client workers (default: auto)',
+         '--client-workers=N' => 'Number of client workers (default: 12)',
          '--connections=N'    => 'Number of TCP connections (default: 514)',
          '--duration=N'       => 'Benchmark duration in seconds (default: 10)',
          '--pipeline=N'       => 'HTTP pipelining factor (default: 1)',
@@ -149,7 +149,7 @@ return new class (
    }
    /**
     * Resolve the client worker count.
-    * When workers = 0 (auto), defaults to nproc / 2.
+    * When workers = 0 (unset), use the fixed benchmark default.
     */
    private function resolveClientWorkers (): int
    {
@@ -157,12 +157,7 @@ return new class (
          return $this->workers;
       }
 
-      // ! 0.6 × logical CPUs (was 0.5). The accounting/latency-fidelity client
-      //   costs more CPU per request than the legacy chunk counter, and at
-      //   0.5 × nproc it becomes the closed-loop bottleneck before the server
-      //   saturates (measured on 24 CPUs: 12 workers → ~849k rps, 14 → ~893k
-      //   against the same live server; 16 regresses on contention).
-      return max(1, (int) round((int)(exec('nproc 2>/dev/null') ?: 1) * 0.6));
+      return 12;
    }
    /**
     * @return array<string,array<string,string>>

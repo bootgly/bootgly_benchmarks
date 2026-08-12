@@ -7,4 +7,8 @@
 return [
    'method' => 'GET',
    'paths'  => ['/'],
+   'expect' => [
+      'status' => 200,
+      'contains' => ['Home'],
+   ],
 ];

@@ -351,7 +351,7 @@ supports multi-worker forking and HTTP pipelining.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--client-workers=N` | auto | Number of client worker processes |
+| `--client-workers=N` | `12` | Number of client worker processes |
 | `--connections=N` | `514` | Number of TCP connections |
 | `--duration=N` | `10` | Benchmark duration in seconds |
 | `--pipeline=N` | `1` | HTTP pipelining factor |

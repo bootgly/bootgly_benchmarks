@@ -208,7 +208,7 @@ $pipelinePathCount = count($pipelinedRequests);
  */
 function runWorker (
    string $host, int $port, int $workerConnections, int $duration,
-   string $method, array $requests, array $requestLengths, int $pathCount,
+   string $method, array $requests, array $requestLengths, int $pathCount, int $pipeline,
    array $pipelinedRequests, array $pipelinedLengths, int $pipelinePathCount,
    ?string $statsFile, mixed $Channel = null,
 ): void {
@@ -269,6 +269,7 @@ function runWorker (
    // # Flush the batched hot counters into the Series, attributing them to a
    //   timestamp inside their own 1-second bucket. Cheap no-op when empty.
    $flush = function () use (&$Series, &$batchAtNS, &$batchSent, &$batchResponses, &$batchBytes): void {
+      // @phpstan-ignore notIdentical.alwaysFalse (mutated by installed callbacks)
       if (($batchSent | $batchResponses | $batchBytes) !== 0) {
          $Series->accumulate($batchAtNS, $batchSent, $batchResponses, $batchBytes);
          $batchSent = 0;
@@ -280,7 +281,7 @@ function runWorker (
    $Client->on(
       Events::WorkerStarted,
       function (TCP_Client_CLI $Client)
-         use ($workerConnections, $method, $requests, $requestLengths, $pathCount,
+         use ($workerConnections, $method, $requests, $requestLengths, $pathCount, $pipeline,
               $pipelinedRequests, $pipelinedLengths, $pipelinePathCount, $duration,
               $Histogram, $Channel, &$bytesRead, &$requestIndex, &$connectionFailed,
               &$originNS, &$deadlineNS, &$startLagNS, &$Series,
@@ -290,6 +291,7 @@ function runWorker (
          // ! Hot-loop hoists: the reactor stamps each select() wakeup once
          //   ($Event->wakeNS) and the single-path replenish never needs the
          //   modulo + per-response array lookups.
+         /** @var \Bootgly\WPI\Events\Select $Event */
          $Event = TCP_Client_CLI::$Event;
          $singleRequest = $requests[0] ?? '';
          $singleLength = $requestLengths[0] ?? 0;
@@ -391,12 +393,133 @@ function runWorker (
             unset($Connections[$socketID]);
          };
 
-         TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
-            use ($Event, $singleRequest, $singleLength,
-                 $requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
-                 &$deadlineNS, &$Trackers,
-                 $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
-         {
+         // ? Pipeline 1 with one endpoint has exactly one final response in
+         //   flight per connection. Select the compact callback once, outside
+         //   the reactor: the strict Tracker still owns framing, latency and
+         //   failure classification, while the steady path avoids carrying
+         //   the generic route rotation and burst builder through every read.
+         if ($pipeline === 1 && $pathCount === 1) {
+            TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
+               use ($Event, $singleRequest, $singleLength, &$bytesRead,
+                    &$deadlineNS, &$Trackers,
+                    $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
+            {
+               // ?! Receive instant = the select() wakeup stamp: every response
+               //    handled here was kernel-buffered before the wakeup, so one
+               //    clock read per wakeup is both cheaper and skew-free across
+               //    the sockets dispatched in it.
+               $nowNS = $Event->wakeNS;
+               if ($nowNS >= $deadlineNS) {
+                  return;
+               }
+
+               $input = $Package->input;
+               $inputBytes = \strlen($input);
+               $bytesRead += $inputBytes;
+
+               $Tracker = $Trackers[$Connection->id] ?? null;
+               if ($Tracker === null) {
+                  $Connection->close();
+                  return;
+               }
+
+               $count = $Tracker->feed($input, $nowNS);
+
+               // ! DataRead is emitted only for a non-empty buffer. Account
+               //   every fragment even when it does not complete a response.
+               if ($nowNS >= $batchEndNS) {
+                  $flush();
+                  $batchAtNS = $nowNS;
+                  // @phpstan-ignore argument.type (bounded monotonic integer arithmetic)
+                  $batchEndNS += (\intdiv($nowNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+               }
+               $batchResponses += $count;
+               $batchBytes += $inputBytes;
+
+               // ! A malformed stream has already been classified by Tracker;
+               //   close it without attempting to resynchronize on body bytes.
+               if ($Tracker->error !== null) {
+                  $Connection->close();
+                  return;
+               }
+
+               // ? A fragmented/informational response must not be replenished.
+               if ($count === 0) {
+                  return;
+               }
+
+               // ! With pipeline 1 only one final response can be outstanding.
+               //   Fail closed if that accounting invariant is ever violated.
+               if ($count !== 1) {
+                  $Tracker->abort('pipeline_window_violation');
+                  $Connection->close();
+                  return;
+               }
+
+               // ? A valid response can explicitly end its HTTP keep-alive
+               //   window; retain its accounting but do not write again.
+               if ($Tracker->reusable === false) {
+                  return;
+               }
+
+               // @ Direct write: a keep-alive socket that just delivered a response is
+               //   almost always writable — skip the EVENT_WRITE round-trip (saves one
+               //   select() round + 4 event-set mutations per request/response cycle).
+               //   No fresh deadline read before the write: the post-write $sentNS
+               //   check below already classifies a boundary-crossing send as
+               //   queued (censored later) instead of in-window sent work.
+               $written = @\fwrite($Socket, $singleRequest);
+               $accepted = $written === false ? 0 : (int) $written;
+               $remaining = $singleLength - $accepted;
+               $sentNS = (int) \hrtime(true);
+
+               if ($remaining === 0) {
+                  if ($sentNS < $deadlineNS) {
+                     // @ No write ledger allocation is needed after the socket has
+                     //   accepted every request byte atomically.
+                     $Tracker->send(1, $sentNS);
+                     if ($sentNS >= $batchEndNS) {
+                        $flush();
+                        $batchAtNS = $sentNS;
+                        // @phpstan-ignore argument.type (bounded monotonic integer arithmetic)
+                        $batchEndNS += (\intdiv($sentNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+                     }
+                     $batchSent++;
+                  }
+                  else {
+                     // ! The syscall crossed the half-open measurement boundary;
+                     //   retain scheduling but classify it outside primary sent work.
+                     $Tracker->queue($singleLength);
+                  }
+                  return; // stay registered for EVENT_READ
+               }
+
+               // @ Partial/failed write — defer the remainder to the event loop
+               //   (onDataWrite flips the connection back to read mode after flush).
+               $Tracker->queue($singleLength);
+               if ($sentNS < $deadlineNS) {
+                  $completed = $Tracker->accept($remaining, $sentNS);
+                  if ($completed > 0) {
+                     if ($sentNS >= $batchEndNS) {
+                        $flush();
+                        $batchAtNS = $sentNS;
+                        $batchEndNS += (\intdiv($sentNS - $batchEndNS, 1_000_000_000) + 1) * 1_000_000_000;
+                     }
+                     $batchSent += $completed;
+                  }
+               }
+               $Connection->output = \substr($singleRequest, $accepted);
+               TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
+               TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            };
+         }
+         else {
+            TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
+               use ($Event, $singleRequest, $singleLength,
+                    $requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
+                    &$deadlineNS, &$Trackers,
+                    $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
+            {
             // ?! Receive instant = the select() wakeup stamp: every response
             //    handled here was kernel-buffered before the wakeup, so one
             //    clock read per wakeup is both cheaper and skew-free across
@@ -519,7 +642,8 @@ function runWorker (
             $Connection->output = \substr($burst, $accepted);
             TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
             TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
-         };
+            };
+         }
 
          // @ Open connections
          for ($i = 0; $i < $workerConnections; $i++) {
@@ -679,7 +803,7 @@ function runWorker (
 if ($requestedWorkers <= 1) {
    // @ Single-worker: no fork, run directly
    runWorker($host, $port, $connectionsPerWorker, $duration,
-             $method, $requests, $requestLengths, $pathCount,
+             $method, $requests, $requestLengths, $pathCount, $pipeline,
              $pipelinedRequests, $pipelinedLengths, $pipelinePathCount, null);
    exit(0);
 }
@@ -704,7 +828,7 @@ for ($w = 0; $w < $requestedWorkers; $w++) {
       \fclose($ParentChannel);
       $statsFile = $Artifacts->resolve('child-' . \getmypid() . '.json');
       runWorker($host, $port, $workerConnections, $duration,
-                $method, $requests, $requestLengths, $pathCount,
+                $method, $requests, $requestLengths, $pathCount, $pipeline,
                 $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
                 $statsFile, $ChildChannel);
       exit(0);

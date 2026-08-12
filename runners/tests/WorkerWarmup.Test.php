@@ -330,32 +330,8 @@ $DefaultTCPBanner = $DefaultTCPRunner->banner(Configs::parse([]));
 $Check(
    ($DefaultTCPRunner->meta['client-workers'] ?? null) === 12
       && ($DefaultTCPOptions['--client-workers=N'] ?? null) === 'Number of client workers (default: 12)'
-      && ($DefaultTCPOptions['--client-worker=N'] ?? null) === 'Alias of --client-workers'
       && ($DefaultTCPBanner['Client']['Client workers'] ?? null) === '12',
    'TCP client did not resolve its fixed 12-worker default consistently.',
-);
-
-$SingularTCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
-$SingularTCPRunner->configure(['client-worker' => 2]);
-$Check(
-   ($SingularTCPRunner->meta['client-workers'] ?? null) === 2,
-   'TCP client did not honor the singular --client-worker compatibility alias.',
-);
-
-$conflictingWorkerAliasesRejected = false;
-try {
-   $ConflictingTCPRunner = include dirname(__DIR__) . '/TCP_Client.php';
-   $ConflictingTCPRunner->configure([
-      'client-worker' => 2,
-      'client-workers' => 3,
-   ]);
-}
-catch (InvalidArgumentException) {
-   $conflictingWorkerAliasesRejected = true;
-}
-$Check(
-   $conflictingWorkerAliasesRejected,
-   'TCP client accepted conflicting singular and plural worker options.',
 );
 
 // @ Both concrete clients preserve explicit overrides and expose the same

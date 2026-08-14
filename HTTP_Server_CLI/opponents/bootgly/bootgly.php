@@ -19,13 +19,42 @@ require_once dirname(__DIR__, 3) . '/runners/ServerCapture.php';
 //   a git worktree of bootgly without touching the main working copy).
 $bootglyDir = getenv('BOOTGLY_DIR') ?: __DIR__ . '/../../../../bootgly';
 
+// # Delayed upstream backing the `deferred_fanout` load. Only the `benchmark`
+//   load set routes to it; TechEmpower has no fan-out scenario.
+$upstreamScript = __DIR__ . '/../../artifacts/@upstream/upstream.php';
+$upstreamSocket = getenv('BENCHMARK_UPSTREAM_SOCKET') ?: '/tmp/bootgly-upstream.sock';
+$upstreamDelay = getenv('BENCHMARK_UPSTREAM_DELAY') ?: '10';
+$upstreamWanted = strtolower((string) getenv('BENCHMARK_LOAD_SET')) === 'benchmark';
+
+$Upstream = static function (string $action) use ($upstreamScript, $upstreamSocket, $upstreamDelay): void {
+   $script = escapeshellarg($upstreamScript);
+   $socket = escapeshellarg("--socket={$upstreamSocket}");
+
+   // @ Always reclaim first: a run killed without its stop hook leaves a
+   //   listener holding the path, and it would answer the next run with the
+   //   PREVIOUS delay — a silently mismeasured case instead of a failed one.
+   exec("php {$script} {$socket} stop > /dev/null 2>&1");
+
+   if ($action === 'stop') {
+      return;
+   }
+
+   $delay = escapeshellarg('--delay=' . $upstreamDelay);
+   exec("php {$script} {$socket} {$delay} > /dev/null 2>&1 &");
+   usleep(300_000);
+};
+
 $action = $argv[1] ?? 'start';
 
 $exit = match ($action) {
-   'start' => (function () use ($bootglyDir): int {
+   'start' => (function () use ($bootglyDir, $Upstream, $upstreamWanted): int {
       // @ Stop any stale instance
       exec("php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI stop > /dev/null 2>&1");
       usleep(500_000);
+
+      if ($upstreamWanted) {
+         $Upstream('start');
+      }
 
       // ! Server env prefix
       $env = '';
@@ -41,8 +70,12 @@ $exit = match ($action) {
       return ServerCapture::run("{$env}php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI start");
    })(),
 
-   'stop' => (function () use ($bootglyDir): int {
+   'stop' => (function () use ($bootglyDir, $Upstream): int {
       exec("php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI stop > /dev/null 2>&1");
+      // ! Unconditional: the load set that started it is not guaranteed to be
+      //   readable here, and stopping an absent upstream is a no-op.
+      $Upstream('stop');
+
       return 0;
    })(),
 

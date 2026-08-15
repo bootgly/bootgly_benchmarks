@@ -20,6 +20,7 @@ $runnerType = strtolower(getenv('BENCHMARK_RUNNER') ?: 'tcp_client');
 $runnerFile = match ($runnerType) {
    'tcp_client'  => 'TCP_Client',
    'http_client' => 'HTTP_Client',
+   'sse_raw'     => 'SSE_Raw',
    default       => ucfirst($runnerType),
 };
 $Runner = include __DIR__ . "/../runners/{$runnerFile}.php";
@@ -29,11 +30,29 @@ $poolMax = DatabaseParity::normalize($loadSet);
 
 // ? Explicit set required — this case ships two sets, no silent default.
 //   Skipped under --help (BENCHMARK_HELP), which only needs the Runner options.
-if (getenv('BENCHMARK_HELP') !== '1' && $loadSet !== 'techempower' && $loadSet !== 'benchmark') {
+$sets = ['techempower', 'benchmark', 'sse'];
+
+if (getenv('BENCHMARK_HELP') !== '1' && in_array($loadSet, $sets, true) === false) {
    fwrite(STDERR,
       "HTTP_Server_CLI benchmark: unknown load set '{$loadSet}'.\n"
-      . "Pass --loads=<set>:<indexes> with set = techempower | benchmark "
-      . "(e.g. --loads=techempower:* or --loads=benchmark:1,2).\n"
+      . "Pass --loads=<set>:<indexes> with set = techempower | benchmark | sse "
+      . "(e.g. --loads=techempower:* or --loads=sse:1).\n"
+   );
+   exit(1);
+}
+
+// ? The `sse` set has no request/response cycle to count — it needs its own
+//   runner, and pairing it with the default one silently reports connection
+//   churn as throughput. Fail loudly instead.
+if (
+   getenv('BENCHMARK_HELP') !== '1'
+   && $loadSet === 'sse'
+   && $runnerType !== 'sse_raw'
+) {
+   fwrite(STDERR,
+      "HTTP_Server_CLI benchmark: the 'sse' load set requires --runner=sse_raw.\n"
+      . "An event stream never completes a response, so the request/response "
+      . "runners would count one response per stream teardown.\n"
    );
    exit(1);
 }
@@ -85,6 +104,7 @@ if (property_exists($Runner, 'preflightTimeout')) {
 // @ Load PHP loads for the active set
 $loadDir = match ($loadSet) {
    'techempower' => '/loads/techempower',
+   'sse'         => '/loads/sse',
    default       => '/loads/benchmark',
 };
 $Runner->load(__DIR__ . $loadDir);

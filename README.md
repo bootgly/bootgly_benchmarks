@@ -15,12 +15,13 @@
 
 Benchmarks | Interface | Result
 --- | --- | ---
-[Progress Bar][BENCHMARK_01] | CLI | ≈ 7x faster than Laravel / Symfony Progress Bar to render 250k iterations
-[Template Engine - foreach][BENCHMARK_02] | ABI | ≈ 9x faster than Laravel Blade (without sacrificing features)
-[HTTP Server CLI][BENCHMARK_03] | WPI | TechEmpower benchmark: 6 canonical routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`) vs opponents
 [Cache][BENCHMARK_04] | ABI | Per-driver × per-operation matrix (File / APCu / Shared / Redis): store, fetch, increment, tags, resolve, ...
+[Template Engine - foreach][BENCHMARK_02] | ABI | ≈ 9x faster than Laravel Blade (without sacrificing features)
+[Progress Bar][BENCHMARK_01] | CLI | ≈ 7x faster than Laravel / Symfony Progress Bar to render 250k iterations
+[HTTP Server CLI][BENCHMARK_03] | WPI | TechEmpower benchmark: 6 canonical routes (`/plaintext`, `/json`, `/db`, `/query`, `/fortunes`, `/updates`) vs opponents
 [TCP Server CLI][BENCHMARK_05] | WPI | Raw socket-level throughput (accept, read, write, close) — no HTTP routing/middleware. Loads: echo + raw HTTP
 [UDP Server CLI][BENCHMARK_06] | WPI | Raw datagram echo throughput — no TCP framing. One datagram in → one echoed out
+[WS Server CLI][BENCHMARK_07] | WPI | Persistent WebSocket connections (RFC 6455 / 7692) driven by Bootgly's own WS client, so one run exercises both sides. Loads: echo, broadcast fan-out, handshake rate
 
 <!-- Links -->
 [BENCHMARK_01]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Progress_Bar/README.md
@@ -29,6 +30,7 @@ Benchmarks | Interface | Result
 [BENCHMARK_04]: https://github.com/bootgly/bootgly_benchmarks/tree/main/Cache/README.md
 [BENCHMARK_05]: https://github.com/bootgly/bootgly_benchmarks/tree/main/TCP_Server_CLI/README.md
 [BENCHMARK_06]: https://github.com/bootgly/bootgly_benchmarks/tree/main/UDP_Server_CLI/README.md
+[BENCHMARK_07]: https://github.com/bootgly/bootgly_benchmarks/tree/main/WS_Server_CLI/README.md
 
 ---
 
@@ -103,6 +105,7 @@ Available cases:
 ./bootgly test benchmark HTTP_Server_CLI
 ./bootgly test benchmark TCP_Server_CLI
 ./bootgly test benchmark UDP_Server_CLI
+./bootgly test benchmark WS_Server_CLI
 ./bootgly test benchmark Progress_Bar
 ./bootgly test benchmark Template_Engine
 ./bootgly test benchmark Cache
@@ -113,6 +116,47 @@ Available cases:
 > **self-contained image** — `bootgly/bootgly_benchmarks:<opponent>` bundles Bootgly + the
 > opponent runtime + PostgreSQL and runs the whole benchmark from one `docker run` (zero
 > host setup). See the [HTTP Server CLI Docker Quickstart][BENCHMARK_03] for copy-paste commands.
+
+#### Load sets per case
+
+Every run needs `--loads=<set>:<selector>`. The selector is 1-based: `N`, `A..B`,
+`A..B:S`, `N,N` or `*`.
+
+| Case | Load set | Loads | What it covers |
+|---|---|---|---|
+| `HTTP_Server_CLI` | `techempower` | 7 | The canonical cross-framework routes — the only set to use against other opponents |
+| | `benchmark` | 23 | Bootgly-only self-comparison: 100 static + 100 dynamic routes, nesting, middleware, PostgreSQL probes, reactor probes |
+| | `sse` | 2 | Server-Sent Events — **requires `--runner=sse_raw`** |
+| `WS_Server_CLI` | `echo` *(default)* | 4 | Round-trip message throughput: small, large, binary, pipelined |
+| | `broadcast` | 1 | Server-side fan-out to every connection |
+| | `connect` | 1 | Upgrade-handshake rate |
+| `TCP_Server_CLI` | `default` | 2 | Raw socket echo + raw HTTP |
+| `UDP_Server_CLI` | `default` | 1 | Datagram echo |
+| `Cache` | `default` | — | One shared workload (`scenarios.php`) run identically by every driver |
+| `Progress_Bar` | `default` | — | Single render workload |
+| `Template_Engine` | `default` | — | Single render workload |
+
+```bash
+# The whole TechEmpower set, cross-framework
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly,swoole --loads=techempower:*
+
+# One Bootgly-only load by index
+./bootgly test benchmark HTTP_Server_CLI --opponents=bootgly --loads=benchmark:20
+
+# Server-Sent Events — needs its own runner
+./bootgly test benchmark HTTP_Server_CLI --runner=sse_raw --opponents=bootgly --loads=sse:*
+```
+
+> The `sse` set cannot run under the default runner. An event stream never completes a
+> response, so a request/response runner would count one response per stream teardown —
+> connection churn reported as throughput. The case refuses that pairing instead of
+> publishing the wrong number.
+
+To list a case's own options (including runner options), append `--help`:
+
+```bash
+./bootgly test benchmark HTTP_Server_CLI --help
+```
 
 ### 3. Get help
 

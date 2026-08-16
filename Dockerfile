@@ -28,6 +28,61 @@
 # ============================================================================
 
 ARG BOOTGLY_FULL_IMAGE=bootgly:full
+# ! Global scope on purpose: the stage selection below expands it in a `FROM`,
+#   and `FROM` only sees ARGs declared before the first stage. Declared again
+#   inside the bench stage, where the RUN guards read it.
+ARG WITH_FRANKENPHP=0
+
+# ! FrankenPHP source — consumed by the COPY in the bench stage below.
+#
+#   Pinned by IMMUTABLE IMAGE DIGEST, not by a release-asset checksum, because
+#   php/frankenphp REBUILDS AND RE-UPLOADS the binaries of already-published
+#   releases: v1.12.5 got its asset 13h after publication, v1.12.6 17 days
+#   after, v1.12.7 9 days after. A pinned sha256 against those assets is
+#   therefore guaranteed to break — it is not a matter of picking a newer tag.
+#   Check any candidate with:
+#     gh api repos/php/frankenphp/releases/tags/<tag> \
+#       --jq '.published_at, (.assets[] | select(.name=="frankenphp-linux-x86_64") | .created_at)'
+#   An asset NEWER than its release means the artifact was swapped after publication.
+#
+#   The image tag also pins the embedded PHP. That matters for benchmark
+#   validity: the standalone binary carries its own PHP, and the rebuilt v1.12.4
+#   asset ships PHP 8.5.8 — it would have raced every other opponent (and
+#   Bootgly) on a different PHP than the base image provides. `php8.4.24` keeps
+#   the whole comparison on one runtime.
+FROM dunglas/frankenphp:1.12.7-php8.4.24-bookworm@sha256:cef99f108009ed60c6d60261c8edc17104fce06aafaf24c21119cd4b4c704aa7 AS frankenphp-1
+# ? Everything lands under /opt/frankenphp, NEVER in /usr/local/lib: the bench
+#   base image already ships its own /usr/local/lib/libphp.so, and FrankenPHP
+#   carries one too. Copying over it would swap the PHP library out from under
+#   the very image used to benchmark Bootgly against FrankenPHP.
+#
+#   The opponent resolves the binary through the PATH (`command -v frankenphp`),
+#   so a wrapper is enough to point it at the private lib directory. The wrapper
+#   ships INSIDE this payload on purpose — if it existed while the real binary
+#   did not, the opponent's capability guard would pass and then fail at launch.
+RUN set -eux; \
+    mkdir -p /out/opt/frankenphp/bin /out/opt/frankenphp/lib /out/usr/local/bin; \
+    cp /usr/local/bin/frankenphp /out/opt/frankenphp/bin/; \
+    cp /usr/local/lib/libphp.so /usr/local/lib/libwatcher-c.so.0 /out/opt/frankenphp/lib/; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      '# Wrapper — keeps FrankenPHP on its own libphp.so without touching the image base.' \
+      'LD_LIBRARY_PATH=/opt/frankenphp/lib' \
+      'export LD_LIBRARY_PATH' \
+      'exec /opt/frankenphp/bin/frankenphp "$@"' \
+      > /out/usr/local/bin/frankenphp; \
+    chmod +x /out/usr/local/bin/frankenphp
+
+# ? WITH_FRANKENPHP=0 — an empty payload, so the COPY below lands nothing and
+#   the other nine opponent images do not carry FrankenPHP's 75 MB.
+FROM ${BOOTGLY_FULL_IMAGE} AS frankenphp-0
+RUN mkdir -p /out
+
+# ! Stage selection. `FROM` expands variables (global-scope ARG only); `--from`
+#   does NOT — Docker rejects it outright — so the choice is made here and the
+#   bench stage copies from a fixed name.
+FROM frankenphp-${WITH_FRANKENPHP} AS frankenphp-selected
+
 FROM ${BOOTGLY_FULL_IMAGE} AS bench
 
 # * Opt-in opponents (0 = off, 1 = on). PostgreSQL is NOT an opt-in — it is
@@ -93,16 +148,12 @@ RUN if [ "$WITH_HYPERF" = "1" ]; then set -eux; \
       cd "$BOOTABLES/hyperf"; composer install --no-interaction --no-progress; \
     fi
 
-# ! FrankenPHP — pinned linux/amd64 standalone binary. Verify the release asset
-#   before installing it so a mutable or corrupted download cannot enter a
-#   benchmark image unnoticed.
-RUN if [ "$WITH_FRANKENPHP" = "1" ]; then set -eux; \
-      curl -fsSL https://github.com/php/frankenphp/releases/download/v1.12.4/frankenphp-linux-x86_64 \
-        -o /usr/local/bin/frankenphp; \
-      echo '4868ea3260a661f8abb881e92e7c713bc93c8f6676f9034b9d9b4551fcf19670  /usr/local/bin/frankenphp' \
-        | sha256sum -c -; \
-      chmod +x /usr/local/bin/frankenphp; \
-    fi
+# ! FrankenPHP — the binary, its two private libraries and the PATH wrapper,
+#   taken from the official image pinned by digest at the top of this file.
+#   Empty when WITH_FRANKENPHP=0, so this copies nothing into the other nine
+#   opponent images. No ldconfig: the libraries stay out of the linker's search
+#   path by design, reached only through the wrapper's LD_LIBRARY_PATH.
+COPY --from=frankenphp-selected /out/ /
 
 # ! ReactPHP — pure-PHP async (react/*, voryx/pgasync over the wire protocol). pcntl +
 #   sockets are already in the base image, so only the composer vendor is added here.

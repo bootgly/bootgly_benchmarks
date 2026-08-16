@@ -37,6 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # PHP opponents
           - { tag: swoole,         arg: WITH_SWOOLE }
           - { tag: workerman,      arg: WITH_WORKERMAN }
           - { tag: roadrunner,     arg: WITH_ROADRUNNER }
@@ -45,6 +46,11 @@ jobs:
           - { tag: reactphp,       arg: WITH_REACTPHP }
           - { tag: amphp,          arg: WITH_AMPHP }
           - { tag: laravel-octane, arg: WITH_LARAVEL_OCTANE }
+          # JS opponents — every WITH_* the Dockerfile accepts must be listed
+          # here, or its image is only ever produced by a manual local build and
+          # silently ages behind the others on every framework release.
+          - { tag: express,        arg: WITH_EXPRESS }
+          - { tag: bun,            arg: WITH_BUN }
 
     steps:
       - name: Checkout bootgly_benchmarks

@@ -177,10 +177,13 @@ $exit = match ($action) {
          return 1;
       }
 
+      // ? A missing artifact means this opponent owns no master, and a server
+      //   that never started is already stopped. Failing here would replace the
+      //   real startup error (the captured boot output) with an unrelated stop
+      //   exception, so the anomaly is recorded without becoming one. Whatever
+      //   else may hold the port is deliberately not adopted — see above.
       if ($managed) {
          fwrite(STDERR, "Swoole master PID artifact is missing: {$PIDFile}\n");
-
-         return 1;
       }
 
       return 0;

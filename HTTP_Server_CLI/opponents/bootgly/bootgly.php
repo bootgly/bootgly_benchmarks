@@ -71,12 +71,37 @@ $exit = match ($action) {
    })(),
 
    'stop' => (function () use ($bootglyDir, $Upstream): int {
-      exec("php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI stop > /dev/null 2>&1");
+      // @ Capture instead of discarding: a silently failed stop is exactly how
+      //   a surviving master reaches the next opponent, where it keeps the
+      //   benchmark port bound and surfaces as an unrelated
+      //   `Address already in use` instead of the real cause.
+      $output = [];
+      $status = 0;
+      exec(
+         "php {$bootglyDir}/bootgly project Benchmark/HTTP_Server_CLI stop 2>&1",
+         $output,
+         $status
+      );
+
       // ! Unconditional: the load set that started it is not guaranteed to be
       //   readable here, and stopping an absent upstream is a no-op.
       $Upstream('stop');
 
-      return 0;
+      // ? `stop` also exits non-zero for an already-absent project, so its
+      //   status alone cannot separate "nothing to stop" from "could not
+      //   stop" — and the runner turns any non-zero into a fatal error. The
+      //   bound port is the authority: only an actual survivor fails here.
+      $port = (int) (getenv('BENCHMARK_PORT') ?: 8082);
+      $socket = @stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $error, 1.0);
+      if ($socket === false) {
+         return 0;
+      }
+      fclose($socket);
+
+      fwrite(STDERR, implode("\n", $output) . "\n");
+      fwrite(STDERR, "The Bootgly opponent still holds port {$port} after stop.\n");
+
+      return $status !== 0 ? $status : 1;
    })(),
 
    default => 1,

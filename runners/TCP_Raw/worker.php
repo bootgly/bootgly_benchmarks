@@ -170,23 +170,25 @@ function runWorker (
               &$responsesReceived, &$bytesRead, &$startTime,
               &$latencySum, &$latencyCount, &$writeTimes)
       {
-         TCP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
-            use ($message)
+         $Event = $Client->Event;
+
+         $Client->onClientConnect = function ($Socket, $Connection)
+            use ($Event, $message)
          {
             $Connection->output = $message;
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            $Event->add($Socket, $Event::EVENT_WRITE, $Connection);
          };
 
-         TCP_Client_CLI::$onDataWrite = function ($Socket, $Connection, $Package)
-            use (&$writeTimes)
+         $Client->onDataWrite = function ($Socket, $Connection, $Package)
+            use ($Event, &$writeTimes)
          {
             $writeTimes[(int) $Socket] = microtime(true);
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_WRITE);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
+            $Event->del($Socket, $Event::EVENT_WRITE);
+            $Event->add($Socket, $Event::EVENT_READ, $Connection);
          };
 
-         TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
-            use ($message, $delimiter, &$responsesReceived, &$bytesRead,
+         $Client->onDataRead = function ($Socket, $Connection, $Package)
+            use ($Event, $message, $delimiter, &$responsesReceived, &$bytesRead,
                  &$latencySum, &$latencyCount, &$writeTimes)
          {
             $input = $Package->input;
@@ -224,8 +226,8 @@ function runWorker (
             // @ Partial/failed write — defer the remainder to the event loop
             //   (onDataWrite flips the connection back to read mode after flush).
             $Connection->output = $sent === false ? $burst : \substr($burst, $sent);
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            $Event->del($Socket, $Event::EVENT_READ);
+            $Event->add($Socket, $Event::EVENT_WRITE, $Connection);
          };
 
          // @ Open connections
@@ -240,14 +242,14 @@ function runWorker (
          // @ Set timer to stop the event loop after duration
          Timer::add(
             interval: $duration,
-            handler: function () {
-               TCP_Client_CLI::$Event->destroy();
+            handler: function () use ($Event) {
+               $Event->destroy();
             },
             persistent: false,
          );
 
          // @ Enter event loop
-         TCP_Client_CLI::$Event->loop();
+         $Event->loop();
       }
    );
 

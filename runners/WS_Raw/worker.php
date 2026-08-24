@@ -179,26 +179,29 @@ function makeClient (string $host, int $port): WS_Client_CLI
 }
 
 /**
- * Open every constructed client, THEN run the shared loop. Clients MUST be
- * constructed before any open() — each constructor overwrites the static event
- * loop, so the live loop is the last-constructed one and every open() must
- * target it.
+ * Open every constructed client, THEN run the shared loop. The FIRST opened
+ * client leads the shared loop and every later open() adopts its reactor, so
+ * the duration timer must stop the loop through a successfully opened client.
  *
  * @param array<int,WS_Client_CLI> $Clients
  */
 function openAndRun (array $Clients, int $duration): void
 {
+   $Opened = [];
    foreach ($Clients as $Client) {
       if ($Client->open('/') === false) {
          break;
       }
+      $Opened[] = $Client;
    }
 
    // @ Stop the shared loop after the duration window.
    Timer::add(
       interval: $duration,
-      handler: function () {
-         WS_Client_CLI::$Event->destroy();
+      handler: function () use (&$Opened) {
+         if ($Opened !== []) {
+            $Opened[0]->Event->destroy();
+         }
       },
       persistent: false,
    );
@@ -333,11 +336,13 @@ function runBroadcast (
 
    $startTime = \microtime(true);
 
-   // @ Open all clients (each open() targets the shared, last-constructed loop).
+   // @ Open all clients (the first successful open() leads the shared loop).
+   $Opened = [];
    foreach ($Clients as $Client) {
       if ($Client->open('/') === false) {
          break;
       }
+      $Opened[] = $Client;
    }
 
    // @ Stall recovery: if no fan-out frame arrived in the last second, the token
@@ -365,8 +370,10 @@ function runBroadcast (
    // @ Stop the shared loop after the duration window.
    Timer::add(
       interval: $duration,
-      handler: function () {
-         WS_Client_CLI::$Event->destroy();
+      handler: function () use (&$Opened) {
+         if ($Opened !== []) {
+            $Opened[0]->Event->destroy();
+         }
       },
       persistent: false,
    );
@@ -407,11 +414,12 @@ function runConnect (
 
    // @ One global stop at t=duration; between batches the loop returns on its
    //   own (every connection closes on connect), so this only fires to cut a
-   //   final in-flight batch.
+   //   final in-flight batch — through the batch's live shared loop.
+   $Anchor = null;
    Timer::add(
       interval: $duration,
-      handler: function () {
-         WS_Client_CLI::$Event->destroy();
+      handler: function () use (&$Anchor) {
+         $Anchor?->Event->destroy();
       },
       persistent: false,
    );
@@ -425,11 +433,13 @@ function runConnect (
          $Clients[] = $Client;
       }
 
+      $Anchor = null;
       foreach ($Clients as $Client) {
          $dialTimes[\spl_object_id($Client)] = \microtime(true);
          if ($Client->open('/') === false) {
             break;
          }
+         $Anchor ??= $Client;
       }
 
       WS_Client_CLI::run();

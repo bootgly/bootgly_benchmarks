@@ -248,15 +248,16 @@ function runWorker (
          }
          $Series = new Series($originNS, $deadlineNS);
 
-         HTTP_Client_CLI::$Event->defer(
+         $Event = $Client->Event;
+         $Event->defer(
             $deadlineNS,
-            static function (): void {
-               HTTP_Client_CLI::$Event->destroy();
+            static function () use ($Event): void {
+               $Event->destroy();
             },
          );
 
          // @ Enter the reactor until its absolute monotonic deadline.
-         HTTP_Client_CLI::$Event->loop();
+         $Event->loop();
       })
       ->on(Events::DataWrite, function ($Socket, $Connection, $Request)
          use (&$deadlineNS, &$sent, &$timingValid, &$SendTimes, &$Series)

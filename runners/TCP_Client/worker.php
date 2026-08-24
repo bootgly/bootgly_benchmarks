@@ -292,12 +292,12 @@ function runWorker (
          //   ($Event->wakeNS) and the single-path replenish never needs the
          //   modulo + per-response array lookups.
          /** @var \Bootgly\WPI\Events\Select $Event */
-         $Event = TCP_Client_CLI::$Event;
+         $Event = $Client->Event;
          $singleRequest = $requests[0] ?? '';
          $singleLength = $requestLengths[0] ?? 0;
 
-         TCP_Client_CLI::$onClientConnect = function ($Socket, $Connection)
-            use ($method, $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
+         $Client->onClientConnect = function ($Socket, $Connection)
+            use ($Event, $method, $pipelinedRequests, $pipelinedLengths, $pipelinePathCount,
                  $Histogram, &$requestIndex, &$Trackers, &$Connections)
          {
             // @ Fill pipeline: send initial burst of N requests
@@ -308,10 +308,10 @@ function runWorker (
             $Connections[$Connection->id] = $Connection;
             $Connection->output = $pipelinedRequests[$index];
             $requestIndex += \count($pipelinedLengths[$index]);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            $Event->add($Socket, $Event::EVENT_WRITE, $Connection);
          };
 
-         TCP_Client_CLI::$onDataProgress = function (
+         $Client->onDataProgress = function (
             $Socket, $Connection, $Package, int $accepted, int $remaining
          ) use (&$deadlineNS, &$Trackers,
                 $flush, &$batchAtNS, &$batchEndNS, &$batchSent): void
@@ -335,14 +335,15 @@ function runWorker (
             }
          };
 
-         TCP_Client_CLI::$onDataWrite = function ($Socket, $Connection, $Package)
+         $Client->onDataWrite = function ($Socket, $Connection, $Package)
+            use ($Event)
          {
             // @ Switch to read mode (remove from writes to prevent duplicate sends)
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_WRITE);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_READ, $Connection);
+            $Event->del($Socket, $Event::EVENT_WRITE);
+            $Event->add($Socket, $Event::EVENT_READ, $Connection);
          };
 
-         TCP_Client_CLI::$onClientDisconnect = function ($Connection)
+         $Client->onClientDisconnect = function ($Connection)
             use (&$deadlineNS, &$Series, &$Trackers, &$Connections)
          {
             $socketID = $Connection->id;
@@ -399,7 +400,7 @@ function runWorker (
          //   failure classification, while the steady path avoids carrying
          //   the generic route rotation and burst builder through every read.
          if ($pipeline === 1 && $pathCount === 1) {
-            TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
+            $Client->onDataRead = function ($Socket, $Connection, $Package)
                use ($Event, $singleRequest, $singleLength, &$bytesRead,
                     &$deadlineNS, &$Trackers,
                     $flush, &$batchAtNS, &$batchEndNS, &$batchSent, &$batchResponses, &$batchBytes)
@@ -509,12 +510,12 @@ function runWorker (
                   }
                }
                $Connection->output = \substr($singleRequest, $accepted);
-               TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
-               TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+               $Event->del($Socket, $Event::EVENT_READ);
+               $Event->add($Socket, $Event::EVENT_WRITE, $Connection);
             };
          }
          else {
-            TCP_Client_CLI::$onDataRead = function ($Socket, $Connection, $Package)
+            $Client->onDataRead = function ($Socket, $Connection, $Package)
                use ($Event, $singleRequest, $singleLength,
                     $requests, $requestLengths, $pathCount, &$requestIndex, &$bytesRead,
                     &$deadlineNS, &$Trackers,
@@ -640,8 +641,8 @@ function runWorker (
                }
             }
             $Connection->output = \substr($burst, $accepted);
-            TCP_Client_CLI::$Event->del($Socket, TCP_Client_CLI::$Event::EVENT_READ);
-            TCP_Client_CLI::$Event->add($Socket, TCP_Client_CLI::$Event::EVENT_WRITE, $Connection);
+            $Event->del($Socket, $Event::EVENT_READ);
+            $Event->add($Socket, $Event::EVENT_WRITE, $Connection);
             };
          }
 
@@ -674,15 +675,15 @@ function runWorker (
          $batchResponses = 0;
          $batchBytes = 0;
 
-         TCP_Client_CLI::$Event->defer(
+         $Event->defer(
             $deadlineNS,
-            static function (): void {
-               TCP_Client_CLI::$Event->destroy();
+            static function () use ($Event): void {
+               $Event->destroy();
             },
          );
 
          // @ Enter the reactor until its absolute monotonic deadline.
-         TCP_Client_CLI::$Event->loop();
+         $Event->loop();
       }
    );
 

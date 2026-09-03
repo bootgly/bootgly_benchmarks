@@ -181,10 +181,13 @@ jobs:
             projects/Benchmark/HTTP_Server_CLI/Encoders/WorkerEvidence.php \
             ../bootgly_benchmarks/runners/Code.php \
             ../bootgly_benchmarks/runners/RunArtifacts.php \
+            ../bootgly_benchmarks/runners/MeasurementBarrier.php \
             ../bootgly_benchmarks/runners/ServerCapture.php \
             ../bootgly_benchmarks/runners/ServerReadiness.php \
             ../bootgly_benchmarks/runners/WorkerWarmup.php \
             ../bootgly_benchmarks/runners/WorkerGeneration.php \
+            ../bootgly_benchmarks/runners/WorkerResult.php \
+            ../bootgly_benchmarks/runners/WorkerTelemetry.php \
             ../bootgly_benchmarks/runners/WorkerSweep.php \
             ../bootgly_benchmarks/runners/TCP_Client.php \
             ../bootgly_benchmarks/runners/HTTP_Client.php \

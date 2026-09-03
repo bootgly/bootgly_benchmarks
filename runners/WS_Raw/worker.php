@@ -65,6 +65,7 @@ use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Data\Display;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\WPI\Nodes\WS_Client_CLI;
+use Bootgly\WPI\Nodes\WS_Client_CLI\Configs;
 use Bootgly\WPI\Nodes\WS_Client_CLI\Events;
 
 require_once __DIR__ . '/../RunArtifacts.php';
@@ -169,10 +170,12 @@ function makeClient (string $host, int $port): WS_Client_CLI
 {
    $Client = new WS_Client_CLI(WS_Client_CLI::MODE_TEST);
    $Client->configure(
-      host: $host,
-      port: $port,
-      compression: false,
-      heartbeatInterval: 0,
+      new Configs(
+         host: $host,
+         port: $port,
+         compression: false,
+         heartbeatInterval: 0,
+      )
    );
 
    return $Client;

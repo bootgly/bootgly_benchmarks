@@ -67,9 +67,11 @@ use Bootgly\ADI\Databases\SQL;
 use Bootgly\ADI\Databases\SQL\Config as SQLConfig;
 use Bootgly\API\Endpoints\Server\Modes;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI;
+use Bootgly\WPI\Nodes\HTTP_Server_CLI\Configs as ServerConfigs;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Events;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Request;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response;
+use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response\Configs as ResponseConfigs;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Response\Resources\Database as DatabaseResource;
 use Bootgly\WPI\Nodes\HTTP_Server_CLI\Router;
 
@@ -730,24 +732,28 @@ function probe_server (string $Root): void
    $loadDelay = (float) probe_env('BOOTGLY_ADI_PROBE_LOAD_DELAY', '0.25');
    $HTTP_Server_CLI = new HTTP_Server_CLI(Mode: Modes::Interactive);
    $HTTP_Server_CLI->configure(
-      host: '127.0.0.1',
-      port: $port,
-      workers: 1,
-      responseResources: [
-         'Database' => static function (object $Context): DatabaseResource {
-            static $Database = null;
+      new ServerConfigs(
+         host: '127.0.0.1',
+         port: $port,
+         workers: 1,
+      ),
+      new ResponseConfigs(
+         Resources: [
+            'Database' => static function (object $Context): DatabaseResource {
+               static $Database = null;
 
-            if ($Context instanceof Response === false) {
-               throw new RuntimeException('Database response resource expects a Response context.');
-            }
+               if ($Context instanceof Response === false) {
+                  throw new RuntimeException('Database response resource expects a Response context.');
+               }
 
-            if ($Database instanceof SQL === false) {
-               $Database = new SQL(probe_sql_config());
-            }
+               if ($Database instanceof SQL === false) {
+                  $Database = new SQL(probe_sql_config());
+               }
 
-            return new DatabaseResource($Database);
-         },
-      ],
+               return new DatabaseResource($Database);
+            },
+         ],
+      )
    );
 
    $HTTP_Server_CLI->on(

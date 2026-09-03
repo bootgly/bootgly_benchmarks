@@ -61,6 +61,7 @@ use Bootgly\ACI\Tests\Benchmark\HTTP\Tracker;
 use Bootgly\ACI\Tests\Benchmark\Latency\Histogram;
 use Bootgly\ACI\Tests\Benchmark\Time\Series;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI;
+use Bootgly\WPI\Interfaces\TCP_Client_CLI\Configs;
 use Bootgly\WPI\Interfaces\TCP_Client_CLI\Events;
 use Bootgly\Benchmarks\Runners\MeasurementBarrier;
 use Bootgly\Benchmarks\Runners\Profiles;
@@ -261,9 +262,11 @@ function runWorker (
    $Client = new TCP_Client_CLI(TCP_Client_CLI::MODE_TEST);
 
    $Client->configure(
-      host: $host,
-      port: $port,
-      workers: 0,
+      new Configs(
+         host: $host,
+         port: $port,
+         workers: 0,
+      )
    );
 
    // # Flush the batched hot counters into the Series, attributing them to a

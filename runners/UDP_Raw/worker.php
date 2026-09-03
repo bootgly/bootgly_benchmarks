@@ -55,6 +55,7 @@ use Bootgly\ACI\Events\Timer;
 use Bootgly\ACI\Logs\Data\Display;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\WPI\Interfaces\UDP_Client_CLI;
+use Bootgly\WPI\Interfaces\UDP_Client_CLI\Configs;
 use Bootgly\WPI\Interfaces\UDP_Client_CLI\Events;
 
 require_once __DIR__ . '/../RunArtifacts.php';
@@ -154,9 +155,11 @@ function runWorker (
    $Process->State->lock(LOCK_UN);
 
    $Client->configure(
-      host: $host,
-      port: $port,
-      workers: 0,
+      new Configs(
+         host: $host,
+         port: $port,
+         workers: 0,
+      )
    );
 
    $Client->on(

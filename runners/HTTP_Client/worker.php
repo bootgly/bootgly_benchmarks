@@ -55,6 +55,7 @@ use Bootgly\Benchmarks\Runners\MeasurementBarrier;
 use Bootgly\Benchmarks\Runners\RunArtifacts;
 use Bootgly\Benchmarks\Runners\WorkerTelemetry;
 use Bootgly\WPI\Nodes\HTTP_Client_CLI;
+use Bootgly\WPI\Nodes\HTTP_Client_CLI\Configs;
 use Bootgly\WPI\Nodes\HTTP_Client_CLI\Events;
 
 require_once __DIR__ . '/../RunArtifacts.php';
@@ -193,9 +194,11 @@ function runWorker (
    $Client = new HTTP_Client_CLI(HTTP_Client_CLI::MODE_TEST);
 
    $Client->configure(
-      host: $host,
-      port: $port,
-      workers: 0,
+      new Configs(
+         host: $host,
+         port: $port,
+         workers: 0,
+      )
    );
 
    // @ Register HTTP hooks

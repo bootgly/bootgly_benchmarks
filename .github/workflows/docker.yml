@@ -1,17 +1,17 @@
 name: Docker (build + push)
 
 # Builds every bootgly/bootgly_benchmarks:<opponent> image on the fresh
-# bootgly/bootgly:full base and pushes them to Docker Hub — one matrix job per
+# bootgly/bootgly base and pushes them to Docker Hub — one matrix job per
 # opponent (opt in via its WITH_<X> build ARG).
 #
-# The framework images (bootgly/bootgly:slim|full) stay dependency-free and are
+# The Bootgly kit image stays dependency-free and is
 # built by the bootgly repo's own docker.yml on release. This workflow runs
-# AFTER that: it consumes the published bootgly/bootgly:full as its base, so it
+# AFTER that: it consumes the published bootgly/bootgly as its base, so it
 # must never run before the framework image for a given release is on Hub.
 #
 # Triggers:
 #   - repository_dispatch (framework-release): fired by bootgly/docker.yml right
-#     after it pushes bootgly/bootgly:full, so the base is guaranteed fresh.
+#     after it pushes bootgly/bootgly, so the base is guaranteed fresh.
 #   - workflow_dispatch: manual re-run (optionally against a specific base tag).
 #
 # Required repository secrets: DOCKER_USERNAME, DOCKER_PASSWORD (the bootgly
@@ -23,9 +23,8 @@ on:
   workflow_dispatch:
     inputs:
       base:
-        description: 'Base framework image to build FROM.'
-        required: false
-        default: 'bootgly/bootgly:full'
+        description: 'Base framework image to build FROM, e.g. bootgly/bootgly:1.0.0 (required — there is no safe default).'
+        required: true
 
 jobs:
   build:
@@ -37,6 +36,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Bootgly itself — the harness with no opponent baked in. It is also
+          # the base every comparison starts from, so it must be built like the
+          # others and never by hand.
+          - { tag: bootgly,        arg: WITH_NOTHING }
           # PHP opponents
           - { tag: swoole,         arg: WITH_SWOOLE }
           - { tag: workerman,      arg: WITH_WORKERMAN }
@@ -56,10 +59,28 @@ jobs:
       - name: Checkout bootgly_benchmarks
         uses: actions/checkout@v5
 
+      # ! No default. The framework repo publishes no moving stable alias, so the
+      #   only candidates would be `rc`/`beta` — which freeze on the last
+      #   pre-release once a stable ships, and would then bake every contender on
+      #   pre-release code while the run stays green. A release dispatch always
+      #   carries the exact version; a manual run has to name one.
+      # ! Untrusted values reach the shell through `env:`, never through `${{ }}`
+      #   inside `run:` — GitHub substitutes those TEXTUALLY before bash parses
+      #   the script. `client_payload` comes from a repository_dispatch, whose
+      #   token is scoped to this repository alone; this job holds the Docker Hub
+      #   credentials for the whole `bootgly/*` namespace.
       - name: Resolve base image
         id: base
+        env:
+          PAYLOAD_BASE: ${{ github.event.client_payload.base }}
+          INPUT_BASE: ${{ inputs.base }}
         run: |
-          B="${{ github.event.client_payload.base || inputs.base || 'bootgly/bootgly:full' }}"
+          set -euo pipefail
+          B="${PAYLOAD_BASE:-${INPUT_BASE:-}}"
+          if [ -z "$B" ]; then
+            echo "::error::Name the base framework image (e.g. -f base=bootgly/bootgly:1.0.0). There is no default: bootgly/bootgly has no moving stable alias, and defaulting to a pre-release channel would silently benchmark unreleased code."
+            exit 1
+          fi
           echo "value=$B" >> "$GITHUB_OUTPUT"
           echo "Base image: $B"
 
@@ -80,7 +101,7 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            BOOTGLY_FULL_IMAGE=${{ steps.base.outputs.value }}
+            BOOTGLY_FRAMEWORK_IMAGE=${{ steps.base.outputs.value }}
             ${{ matrix.arg }}=1
           tags: |
             bootgly/bootgly_benchmarks:${{ matrix.tag }}

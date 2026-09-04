@@ -96,13 +96,13 @@ unknown, partial, or unsupported two-repository tuple before running; all four
 hash fallbacks and both SHA/dirty pairs must therefore be supplied together. A
 clean (`false`) tuple requires both standard empty SHA-256 digests; an
 index-only staged delta may validly be dirty with both physical digests empty.
-For a local `bootgly:full` build, generate all validated build arguments with
+For a local `bootgly/bootgly` build, generate all validated build arguments with
 the same producer used by CI (run this from the framework repository):
 
 ```bash
 docker build \
   $(php Bootgly/ACI/Tests/Benchmark/provenance.php . ../bootgly_benchmarks --docker-build-args) \
-  -f Dockerfile --target full -t bootgly:full ..
+  -f Dockerfile --target framework -t bootgly:framework .
 ```
 
 Provenance keys are never selected automatically as a chart X axis. Generated

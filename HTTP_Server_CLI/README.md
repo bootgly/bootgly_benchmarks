@@ -453,7 +453,7 @@ All published opponents — `swoole`, `hyperf`, `workerman`, `roadrunner`, `reac
 
 > **Laravel** dropped its FPM/web-server stacks (`laravel-nginx`, `laravel-apache`,
 > `laravel-ols`): nginx/Apache need PHP-FPM (the base image is CLI-only) and OpenLiteSpeed
-> needs its own base — neither fits the single-foreground-server, `FROM bootgly:full`
+> needs its own base — neither fits the single-foreground-server, `FROM bootgly/bootgly`
 > self-contained model. **Octane** (foreground Swoole) is the one that fits.
 
 > `/cached-queries` is **N/A** for Laravel Octane to keep parity with the (now dropped)
@@ -500,7 +500,7 @@ in any SAPI it overrides `zend_execute_ex`, kills JIT and cuts throughput severa
 > The previously-included per-request Laravel stacks (`laravel-nginx`, `laravel-apache`,
 > `laravel-ols`) were dropped from the self-contained set — they need PHP-FPM / a dedicated
 > web server (or, for OLS, its own base image) that don't fit the single-foreground-server
-> `FROM bootgly:full` model. Octane (foreground Swoole) is the Laravel stack that fits.
+> `FROM bootgly/bootgly` model. Octane (foreground Swoole) is the Laravel stack that fits.
 
 Absolute throughput is environment-dependent — run the suite on your own hardware.
 

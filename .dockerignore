@@ -1,0 +1,47 @@
+# ----------------------------------------------------------------------------
+# bootgly_benchmarks — build context ignore
+#
+# The image now COPYs the benchmark cases from THIS repository (they used to
+# ride in on the retired bootgly:full base). The working tree is ~1.1 GB and
+# most of it must never enter a public image: opponent vendor trees rebuilt by
+# the RUN steps, downloaded binaries, recorded results and local state.
+# ----------------------------------------------------------------------------
+
+# @ Security boundary — Git ignore rules do not apply to Docker contexts.
+.git
+.github
+**/.claude
+**/.codex
+**/.agent
+**/.env
+**/.env.*
+
+# ! Public, versioned fixtures the Laravel bootable needs to boot
+!HTTP_Server_CLI/bootables/laravel/.env
+!HTTP_Server_CLI/bootables/laravel/.env.example
+
+# ? Rebuilt inside the image by the opponent RUN steps — never shipped
+**/vendor
+**/node_modules
+**/bootables/roadrunner/rr
+**/bootables/*/frankenphp
+
+# ? Local state and recorded output: not inputs to a build. The bootable
+#   caches matter beyond size: Laravel loads `bootstrap/cache/routes-v7.php`
+#   when present, so a host-generated route table (absolute paths and all)
+#   would be what the octane contender actually serves.
+storage
+scripts/.venv
+scripts/__pycache__
+**/__pycache__
+HTTP_Server_CLI/results
+**/*.log
+**/bootstrap/cache/*.php
+**/bootables/*/cache
+**/storage/framework
+**/*.pid
+**/run
+**/database/*.sqlite
+
+# ? The ignore file itself
+.dockerignore

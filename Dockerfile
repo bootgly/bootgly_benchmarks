@@ -6,7 +6,7 @@
 # plus one opponent, all in-process on loopback, no host setup. Competitor
 # runtimes (Swoole, Workerman, RoadRunner, FrankenPHP, Hyperf, ReactPHP, AMPHP,
 # Laravel Octane, Express/Node.js, Bun and PostgreSQL) live ONLY in this image —
-# never in bootgly:slim / bootgly:full, which stay dependency-free. Opt in per
+# never in the Bootgly framework image, which stays dependency-free. Opt in per
 # opponent with build ARGs.
 #
 # The opponent scripts launch their server natively (no docker-in-docker) —
@@ -19,15 +19,33 @@
 # `benchmark` via the Bootgly /database/* probes — so the image is never useful
 # without it. The entrypoint boots + seeds it locally, zero host setup.
 #
-# Build the framework image first (bootgly:full), then:
-#   docker build -f Dockerfile --build-arg WITH_SWOOLE=1 \
+# The base is the published framework image. It is REQUIRED — name the exact
+# version, since bootgly/bootgly has no `latest` and no stable moving alias
+# (`latest` belongs to bootgly/bootgly.kit):
+#   docker build -f Dockerfile \
+#     --build-arg BOOTGLY_FRAMEWORK_IMAGE=bootgly/bootgly:<version>  \
+#     --build-arg WITH_SWOOLE=1 \
 #     -t bootgly/bootgly_benchmarks:swoole .
 #
 #   docker run --rm bootgly/bootgly_benchmarks:swoole test benchmark HTTP_Server_CLI \
 #     --opponents=bootgly,swoole --runner=tcp_client --loads=techempower:1
 # ============================================================================
 
-ARG BOOTGLY_FULL_IMAGE=bootgly:full
+# ! Base: the Bootgly FRAMEWORK image — the harness runs Bootgly as a
+#   contender and never touches the Console/Web platforms, so it builds on the
+#   ingredient, not on the kit. The retired `bootgly/bootgly:full` used to bake
+#   the benchmark cases itself; they are copied here now, by the repo that owns
+#   them.
+#
+#   NO DEFAULT, on purpose. `bootgly/bootgly` publishes no moving stable alias,
+#   so any default would have to be a channel one (`rc`, `beta`) — which freezes
+#   on the last pre-release the moment a stable ships, and would then bake every
+#   contender image on pre-release code while reporting success. Naming the base
+#   is one flag; guessing it wrong is a silent wrong benchmark.
+#   BuildKit lints the two `FROM ${BOOTGLY_FRAMEWORK_IMAGE}` stages below with
+#   `InvalidDefaultArgInFrom` because of this — that warning IS the intent, not
+#   a defect to fix by inventing a default.
+ARG BOOTGLY_FRAMEWORK_IMAGE
 # ! Global scope on purpose: the stage selection below expands it in a `FROM`,
 #   and `FROM` only sees ARGs declared before the first stage. Declared again
 #   inside the bench stage, where the RUN guards read it.
@@ -75,7 +93,7 @@ RUN set -eux; \
 
 # ? WITH_FRANKENPHP=0 — an empty payload, so the COPY below lands nothing and
 #   the other nine opponent images do not carry FrankenPHP's 75 MB.
-FROM ${BOOTGLY_FULL_IMAGE} AS frankenphp-0
+FROM ${BOOTGLY_FRAMEWORK_IMAGE} AS frankenphp-0
 RUN mkdir -p /out
 
 # ! Stage selection. `FROM` expands variables (global-scope ARG only); `--from`
@@ -83,7 +101,7 @@ RUN mkdir -p /out
 #   bench stage copies from a fixed name.
 FROM frankenphp-${WITH_FRANKENPHP} AS frankenphp-selected
 
-FROM ${BOOTGLY_FULL_IMAGE} AS bench
+FROM ${BOOTGLY_FRAMEWORK_IMAGE} AS bench
 
 # * Opt-in opponents (0 = off, 1 = on). PostgreSQL is NOT an opt-in — it is
 #   always installed below (every load set needs the database).
@@ -97,11 +115,21 @@ ARG WITH_AMPHP=0
 ARG WITH_LARAVEL_OCTANE=0
 ARG WITH_EXPRESS=0
 ARG WITH_BUN=0
+# ! No-op switch: the `bootgly` tag is the harness with no opponent baked in,
+#   and the CI matrix passes one WITH_* per row. Declared so that row consumes
+#   a real ARG instead of tripping the "build arg not consumed" warning.
+ARG WITH_NOTHING=0
 
 # ! Composer (build-time) for opponents that vendor PHP packages
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 ENV BOOTABLES=/bootgly_benchmarks/HTTP_Server_CLI/bootables
+
+# ! Tools the benchmark runner shells out to (port probing, readiness, nproc)
+RUN set -eux; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends curl lsof procps; \
+      rm -rf /var/lib/apt/lists/*
 
 # ! PostgreSQL — ALWAYS installed: server + client + the `pdo_pgsql` PHP driver.
 #   Every benchmark load set hits the DB (techempower /db /query /fortunes /updates
@@ -115,6 +143,12 @@ RUN set -eux; \
       docker-php-ext-install -j"$(nproc)" pdo_pgsql; \
       apt-get purge -y libpq-dev; apt-get autoremove -y; \
       rm -rf /var/lib/apt/lists/*
+
+# ! The benchmark cases — the sibling layout the runner resolves as
+#   BOOTGLY_WORKING_DIR . '../bootgly_benchmarks/'. Copied BEFORE the opponent
+#   steps (several install a bootable's own vendor tree) but AFTER the apt
+#   layers: editing a case must not re-run PostgreSQL and every opponent install.
+COPY . /bootgly_benchmarks/
 
 # # Opponents
 # ! Swoole — cross-framework opponent (also the runtime Hyperf is built on). pdo_pgsql
